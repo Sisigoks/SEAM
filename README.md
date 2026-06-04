@@ -26,7 +26,8 @@ seam/                         # evaluation harness (see "Evaluation harness")
   config.py                   #   model registry, prompt template, metric weights
   runner.py                   #   llama.cpp (GGUF) inference
   parsing.py grading.py       #   CoT/answer parsing; answer matching + labels
-  metrics.py                  #   behavioural metrics + composite SEAM score
+  metrics.py                  #   behavioural metrics, gap, bootstrap CIs, SEAM
+  detectors.py                #   shortcut detectors (lexical/TF-IDF/residual) + AUROC
   semantic.py                 #   RCS (sentence-transformer) + RCS fine-tuning
   mechanistic.py              #   silhouette / SAE-delta / patching / localization
   report.py cli.py            #   tables + figures; `python -m seam` entry point
@@ -186,58 +187,121 @@ behavioural metrics on already-collected responses need only the standard
 library.
 
 ```
-run  ->  grade  ->  metrics  ->  report
-                            +->  finetune  (validate RCS by fine-tuning a sentence-transformer)
+run -> grade -> metrics -> report
+            \-> detect    (shortcut detectors, RQ3: Fig 3 / Fig 4)
+            \-> finetune  (validate RCS by fine-tuning a sentence-transformer)
 ```
+
+### Hardware & models (single T4, 16 GB)
+
+The registry is restricted to models that fit on **one NVIDIA T4** at Q4_K_M and
+whose chain-of-thought the harness can record. **Qwen2.5-7B-Instruct** is the
+reference model (default, and the only one whose activations the residual probe
+uses).
+
+| key | params | GGUF (≈Q4_K_M) | CoT | residual probe |
+|-----|--------|----------------|-----|----------------|
+| `qwen2.5-7b-instruct` (default) | 7B | ~4.7 GB | yes | yes (HF activations) |
+| `llama-3.1-8b-instruct` | 8B | ~4.9 GB | yes | — |
+| `mistral-7b-instruct-v0.3` | 7B | ~4.4 GB | yes | — |
+| `deepseek-r1-distill-qwen-7b` | 7B | ~4.7 GB | yes (`<think>`) | — |
+
+Download the GGUFs into `models/` (filenames match the registry):
 
 ```bash
-# 0. See the prescribed open-weight models (Qwen2.5-72B, DeepSeek-R1 distills,
-#    Llama-3.3-70B, Mistral-Large, Phi-4, Gemma-3-27B).
-python -m seam list-models
+pip install -U "huggingface_hub[cli]"
+hf download Qwen/Qwen2.5-7B-Instruct-GGUF qwen2.5-7b-instruct-q4_k_m.gguf --local-dir models
+hf download bartowski/Meta-Llama-3.1-8B-Instruct-GGUF Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf --local-dir models
+hf download bartowski/Mistral-7B-Instruct-v0.3-GGUF Mistral-7B-Instruct-v0.3-Q4_K_M.gguf --local-dir models
+hf download bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF DeepSeek-R1-Distill-Qwen-7B-Q4_K_M.gguf --local-dir models
+# Older hub versions: replace `hf download` with `huggingface-cli download`.
+# For the residual probe you also need the non-GGUF checkpoint for HF activations:
+hf download Qwen/Qwen2.5-7B-Instruct --local-dir models/Qwen2.5-7B-Instruct
+```
 
-# 1. Collect chain-of-thought responses for all 3 variants of every problem
-#    (llama.cpp / GGUF, Q4_K_M, n-predict 2048):
-python -m seam run --model phi-4 --gguf /models/phi-4-Q4_K_M.gguf --out runs/phi-4.jsonl
+### Pipeline
+
+```bash
+python -m seam list-models                              # 0. the 4 T4 models
+
+# 1. Collect CoT responses for all 3 variants (llama.cpp / GGUF, n-predict 2048).
+#    --logprobs records token-logprob confidence (loads with logits_all=True);
+#    --samples N adds self-consistency + a confidence fallback for ECE.
+python -m seam run --model qwen2.5-7b-instruct --models-dir models --out runs/qwen.jsonl
 
 # 2. Grade: parse the final answer, mark correct/flip, detect shortcut-following.
-python -m seam grade runs/phi-4.jsonl --out graded/phi-4.jsonl
+python -m seam grade runs/qwen.jsonl --out graded/qwen.jsonl
 
-# 3. Metrics: accuracy per condition, Answer Flip Rate, shortcut rate, condition
-#    sensitivity (KL), ECE, and the composite SEAM score. Add --rcs to compute the
-#    Reasoning Consistency Score (needs sentence-transformers).
-python -m seam metrics graded/*.jsonl --out metrics.json --rcs
+# 3. Metrics: accuracy per condition, Shortcut Reliance Gap, AFR, shortcut rate,
+#    condition sensitivity (KL), ECE, SEAM score. --rcs adds RCS; --bootstrap N
+#    adds 95% CIs over base-problem IDs (Table 2).
+python -m seam metrics "graded/*.jsonl" --out metrics.json --rcs --bootstrap 1000
 
-# 4. Report: Table 2 (accuracy x condition), Table 3 (failure taxonomy), figures.
-python -m seam report --metrics metrics.json --out-dir report/
+# 4. Detectors (RQ3): lexical / TF-IDF / residual probe, grouped held-out AUROC.
+#    Residual probe needs activations aligned to the misleading rows:
+python -m seam detect "graded/*.jsonl" --out detectors.json \
+       --activations qwen2.5-7b-instruct=acts/qwen_misleading.npy
 
-# 5. Validate RCS by fine-tuning the sentence-transformer on consistent vs.
-#    flipped CoT pairs; reports held-out ROC-AUC before/after.
-python -m seam finetune graded/*.jsonl --base-model sentence-transformers/all-MiniLM-L6-v2
+# 5. Report: Table 2 (+CIs), Table 3 (detectors), Fig 2 gap heatmap, Fig 4 AUROC.
+python -m seam report --metrics metrics.json --detectors detectors.json --out-dir report/
 
-# One-shot stages 1-4 across several models (GGUFs resolved from --models-dir):
-python -m seam pipeline --models-dir /models --models phi-4,gemma-3-27b-it --work seam_out
+# 6. Validate RCS by fine-tuning the sentence-transformer; held-out ROC-AUC.
+python -m seam finetune "graded/*.jsonl" --base-model sentence-transformers/all-MiniLM-L6-v2
+
+# One-shot stages 1-5 across models (text detectors included; GGUFs in --models-dir):
+python -m seam pipeline --models-dir models --bootstrap 1000 --work seam_out
 ```
+
+> On PowerShell/cmd, quote globs (`"graded/*.jsonl"`) — the CLI expands them itself.
 
 **Metrics implemented.**
 
 | Block | Metric | Where |
 |-------|--------|-------|
 | Behavioural | accuracy per condition; Δhinted / Δmisleading | `metrics.accuracy_table` |
+| | **Shortcut Reliance Gap** (misleading − clean trap-selection; Fig 2) | `metrics.shortcut_reliance_gap`, `gap_by_category` |
 | | Answer Flip Rate (AFR); Shortcut Rate | `metrics.answer_flip_rate`, `metrics.shortcut_rate` |
-| | Condition Sensitivity (KL over answer distributions) | `metrics.condition_sensitivity` |
-| | Expected Calibration Error (ECE) | `metrics.expected_calibration_error` |
-| | Self-consistency (with `--samples N`) | `metrics.self_consistency` |
+| | **Bootstrap 95% CIs over base-problem IDs** (`--bootstrap N`) | `metrics.bootstrap_ci` |
+| | Condition Sensitivity (KL); ECE; Self-consistency (`--samples N`) | `metrics.condition_sensitivity` / `expected_calibration_error` / `self_consistency` |
 | | Failure taxonomy (answer-flip / reasoning-flip / silent-shortcut / confabulation) | `metrics.failure_taxonomy` |
-| Semantic | RCS = cosine(CoT_clean, CoT_misleading) via sentence-transformer | `semantic.rcs_scores` |
-| | RCS fine-tuning + ROC-AUC validation | `semantic.finetune` |
+| Detectors (RQ3) | CoT lexical / TF-IDF / residual probe — grouped held-out AUROC & AUPRC (Fig 4) | `detectors.compare` |
+| | Flagged-among-correct = observable RWRR rate (Fig 3) | `detectors.compare` |
+| Semantic | RCS = cosine(CoT_clean, CoT_misleading); fine-tuning + ROC-AUC | `semantic.rcs_scores`, `semantic.finetune` |
 | | BERTScore, NLI entailment, coverage (optional) | `semantic.bertscore_f1` / `nli_entailment` / `coverage_score` |
-| Mechanistic | activation silhouette (PCA); SAE feature delta | `mechanistic.activation_silhouette`, `sae_feature_delta` |
-| | activation-patching logit diff; causal localization (top-5) | `mechanistic.patching_logit_diff`, `causal_localization` |
+| Mechanistic | activation silhouette; SAE feature delta; patching logit diff; causal localization | `mechanistic.*` |
 | Composite | SEAM score = transparent weighted blend (weights in `config.py`) | `metrics.summarize` |
 
-The mechanistic functions are backend-agnostic — they take numpy arrays you
-extract from your models (HF hooks or llama.cpp embeddings). `python -m seam
-mech-selftest` exercises them on synthetic data so the module is self-checking.
+The mechanistic and residual-probe functions are backend-agnostic — they take
+numpy arrays you extract from your models (HF hooks on the `hf_id` checkpoint, or
+llama.cpp embeddings). `python -m seam mech-selftest` and `python -m seam
+det-selftest` exercise the mechanistic and detector code on synthetic data, so
+both modules are self-checking. *Note:* the paper's `Counterfactual` condition is
+not in this dataset (variants are `clean`/`hinted`/`misleading`); `hinted` is the
+"Helpful" column.
+
+### Outputs — where results are stored and how to read them
+
+Every stage writes to the path you pass with `--out` / `--out-dir`; nothing is
+hidden. With the commands above:
+
+| File | Written by | Contents |
+|------|-----------|----------|
+| `runs/<model>.jsonl` | `run` | one row per (problem, variant): `response`, `cot`, `final_answer`, `confidence` |
+| `graded/<model>.jsonl` | `grade` | the above + `correct`, `label`, `followed_shortcut` |
+| `metrics.json` | `metrics` | per-model summary: accuracies (+CIs), gap, AFR, ECE, RCS, SEAM, failure taxonomy |
+| `detectors.json` | `detect` | per-model detector AUROC / AUPRC / flagged-among-correct |
+| `report/table2_accuracy.md` | `report` | Table 2 (accuracy × condition + Shortcut Reliance Gap, with CIs) |
+| `report/table3_detectors.md` | `report` | Table 3 (detector comparison) |
+| `report/table_failures.md` | `report` | failure-type taxonomy |
+| `report/summary.csv` | `report` | flat per-model table (open in any spreadsheet) |
+| `report/fig2_gap_heatmap.png` | `report` | Shortcut Reliance Gap by model × domain |
+| `report/fig3_failures.png`, `fig4_detectors.png`, `fig8_seam_scatter.png` | `report` | figures |
+| `models/rcs-ft/` | `finetune` | fine-tuned sentence-transformer + before/after AUROC |
+
+`report/` and `summary.csv` are the human-facing outputs; `metrics.json` /
+`detectors.json` are the machine-readable source for the paper. These output
+dirs are git-ignored. Debug a specific model by grepping its graded file, e.g.
+`grep '"label": "shortcut"' graded/qwen.jsonl`.
 
 ## Datasheet
 

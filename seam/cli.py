@@ -15,16 +15,19 @@ if hasattr(sys.stdout, "reconfigure"):
 
 
 def _cmd_models(_):
-    print("Available models (use with `run --model <key>`):")
+    from .config import DEFAULT_MODEL
+    print("T4-runnable models (use with `run --model <key>`):")
     for k, v in MODELS.items():
-        print(f"  {k:<32} {v['repo']}  (think={v['think']})")
+        tag = " [default]" if k == DEFAULT_MODEL else ""
+        print(f"  {k:<30}{tag:<11} ~{v.get('vram_gb','?')}GB  think={v['think']}  "
+              f"probe={v.get('activations', False)}  {v['repo']}")
 
 
 def _cmd_run(a):
     ds = data.load_dataset(a.dataset)
     cats = a.categories.split(",") if a.categories else None
     runner.run(ds, a.model, a.out, gguf_path=a.gguf, models_dir=a.models_dir,
-               samples=a.samples, limit=a.limit, categories=cats)
+               samples=a.samples, want_logprobs=a.logprobs, limit=a.limit, categories=cats)
 
 
 def _cmd_grade(a):
@@ -59,7 +62,7 @@ def _cmd_metrics(a):
         if a.rcs:
             from . import semantic
             rcs = semantic.rcs_scores(mrows, model_name=a.rcs_model)
-        summaries.append(metrics.summarize(mrows, model, rcs=rcs))
+        summaries.append(metrics.summarize(mrows, model, rcs=rcs, ci=a.bootstrap))
 
     with open(a.out, "w", encoding="utf-8", newline="\n") as f:
         json.dump(summaries, f, ensure_ascii=False, indent=2)
@@ -67,10 +70,38 @@ def _cmd_metrics(a):
     print(report.table_accuracy(summaries))
 
 
+def _cmd_detect(a):
+    from . import detectors
+    rows = [grading.grade_row(r) if "label" not in r else r for r in _load_rows(a.infiles)]
+    by_model = defaultdict(list)
+    for r in rows:
+        by_model[r.get("model", "unknown")].append(r)
+    acts = {}
+    for spec in (a.activations or []):                   # "model=path.npy"
+        import numpy as np
+        m, path = spec.split("=", 1)
+        acts[m] = np.load(path)
+    results = {m: detectors.compare(mrows, activations=acts.get(m))
+               for m, mrows in by_model.items()}
+    with open(a.out, "w", encoding="utf-8", newline="\n") as f:
+        json.dump(results, f, ensure_ascii=False, indent=2)
+    print(f"Wrote detector results for {len(results)} model(s) -> {a.out}\n")
+    print(report.table_detectors(results))
+
+
+def _cmd_det_selftest(_):
+    from . import detectors
+    print(json.dumps(detectors.selftest(), indent=2))
+
+
 def _cmd_report(a):
     with open(a.metrics, encoding="utf-8") as f:
         summaries = json.load(f)
-    report.generate(summaries, a.out_dir)
+    detectors = None
+    if a.detectors and os.path.exists(a.detectors):
+        with open(a.detectors, encoding="utf-8") as f:
+            detectors = json.load(f)
+    report.generate(summaries, a.out_dir, detectors=detectors)
 
 
 def _cmd_finetune(a):
@@ -102,17 +133,21 @@ def _cmd_pipeline(a):
         gp = os.path.join(a.work, "graded", f"{m}.jsonl")
         data.write_jsonl(gp, [grading.grade_row(r) for r in data.read_jsonl(rp)])
         graded_paths.append(gp)
+    from . import detectors as det
     rows = _load_rows(graded_paths)
     by_model = defaultdict(list)
     for r in rows:
         by_model[r["model"]].append(r)
-    summaries = [metrics.summarize(v, k) for k, v in by_model.items()]
+    summaries = [metrics.summarize(v, k, ci=a.bootstrap) for k, v in by_model.items()]
+    detector_res = {k: det.compare(v) for k, v in by_model.items()}
     mpath = os.path.join(a.work, "metrics.json")
     with open(mpath, "w", encoding="utf-8") as f:
         json.dump(summaries, f, ensure_ascii=False, indent=2)
-    report.generate(summaries, os.path.join(a.work, "report"))
+    with open(os.path.join(a.work, "detectors.json"), "w", encoding="utf-8") as f:
+        json.dump(detector_res, f, ensure_ascii=False, indent=2)
+    report.generate(summaries, os.path.join(a.work, "report"), detectors=detector_res)
     print("\n" + report.table_accuracy(summaries))
-    print("\nFailure taxonomy:\n" + report.table_failures(summaries))
+    print("\nDetectors:\n" + report.table_detectors(detector_res))
 
 
 def build_parser():
@@ -128,7 +163,10 @@ def build_parser():
     r.add_argument("--gguf", default=None, help="path to a local .gguf")
     r.add_argument("--models-dir", default=None,
                    help="dir of GGUFs named per the model registry")
-    r.add_argument("--samples", type=int, default=1)
+    r.add_argument("--samples", type=int, default=1,
+                   help=">1 enables self-consistency + a confidence fallback")
+    r.add_argument("--logprobs", action="store_true",
+                   help="load with logits_all=True to record token-logprob confidence")
     r.add_argument("--limit", type=int, default=None)
     r.add_argument("--categories", default=None, help="comma-separated filter")
     r.set_defaults(func=_cmd_run)
@@ -142,10 +180,23 @@ def build_parser():
     m.add_argument("--out", default="metrics.json")
     m.add_argument("--rcs", action="store_true", help="compute RCS (needs sentence-transformers)")
     m.add_argument("--rcs-model", default=None)
+    m.add_argument("--bootstrap", type=int, default=0,
+                   help="bootstrap resamples for 95%% CIs over base-problem IDs (0=off)")
     m.set_defaults(func=lambda a: _cmd_metrics(_with_rcs_default(a)))
+
+    dt = sub.add_parser("detect", help="shortcut detectors (lexical/TF-IDF/residual) + AUROC")
+    dt.add_argument("infiles", nargs="+")
+    dt.add_argument("--out", default="detectors.json")
+    dt.add_argument("--activations", action="append",
+                    help="residual probe input as 'model=path.npy' (repeatable)")
+    dt.set_defaults(func=_cmd_detect)
+
+    sub.add_parser("det-selftest", help="run detectors on synthetic data"
+                   ).set_defaults(func=_cmd_det_selftest)
 
     rp = sub.add_parser("report", help="render tables + figures")
     rp.add_argument("--metrics", default="metrics.json"); rp.add_argument("--out-dir", default="report")
+    rp.add_argument("--detectors", default=None, help="detectors.json for Table 3 / Fig 4")
     rp.set_defaults(func=_cmd_report)
 
     ft = sub.add_parser("finetune", help="fine-tune the RCS sentence-transformer")
@@ -164,6 +215,7 @@ def build_parser():
                     help="dir of GGUFs named per the model registry")
     pl.add_argument("--dataset", default=data.DEFAULT_DATASET)
     pl.add_argument("--limit", type=int, default=None)
+    pl.add_argument("--bootstrap", type=int, default=0)
     pl.set_defaults(func=_cmd_pipeline)
     return p
 
