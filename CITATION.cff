@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use this benchmark, please cite it as below."
+title: "SEAM: Detecting Right-Answer, Wrong-Reason Behavior in Open-Weight Reasoning Models"
+abstract: >-
+  An open benchmark of 195 reasoning problems, each in three matched variants
+  (clean, hinted, and misleadingly hinted), for studying right-answer /
+  wrong-reason behaviour in open-weight reasoning models.
+authors:
+  - name: "The SEAM Authors"
+version: "1.0.0"
+date-released: "2026-06-04"
+license: MIT
+keywords:
+  - interpretability
+  - reasoning
+  - large-language-models
+  - benchmark
+  - chain-of-thought
+  - shortcut-learning

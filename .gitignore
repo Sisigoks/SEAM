@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# SEAM harness outputs and model artifacts
+seam_out/
+runs/
+graded/
+report/
+models/
+metrics.json
+*.gguf
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

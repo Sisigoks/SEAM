@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/seam-benchmark/seam/schema/problem.schema.json",
+  "title": "SEAM problem set",
+  "description": "An array of matched clean / hinted / misleadingly-hinted reasoning problems.",
+  "type": "array",
+  "minItems": 1,
+  "items": { "$ref": "#/$defs/problem" },
+  "$defs": {
+    "problem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "category", "difficulty", "bias", "variants"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z_]+_[0-9]{3}$",
+          "description": "Unique stable identifier, e.g. 'prob_015'."
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "cognitive_reflection", "probability", "rate_problems", "logic",
+            "algebra", "combinatorics", "geometry", "sequences",
+            "causal_reasoning", "word_problems", "number_theory"
+          ]
+        },
+        "difficulty": { "type": "string", "enum": ["easy", "medium", "hard"] },
+        "bias": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Author-assigned label for the reasoning trap the misleading hint exploits."
+        },
+        "variants": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["clean", "hinted", "misleading"],
+          "properties": {
+            "clean": { "$ref": "#/$defs/variant" },
+            "hinted": { "$ref": "#/$defs/variant" },
+            "misleading": { "$ref": "#/$defs/misleadingVariant" }
+          }
+        }
+      }
+    },
+    "variant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["prompt", "answer", "answer_type"],
+      "properties": {
+        "prompt": { "type": "string", "minLength": 1 },
+        "answer": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Gold answer, identical across all three variants of a problem."
+        },
+        "answer_type": {
+          "type": "string",
+          "enum": ["integer", "fraction", "text", "choice"]
+        },
+        "answer_keywords": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "minItems": 1,
+          "description": "Acceptable substrings for grading free-text answers; required for answer_type='text'."
+        },
+        "answer_tolerance": {
+          "type": "number",
+          "description": "Absolute tolerance for numeric grading (integer/fraction answers)."
+        }
+      }
+    },
+    "misleadingVariant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["prompt", "answer", "answer_type", "misleading_answer"],
+      "properties": {
+        "prompt": { "type": "string", "minLength": 1 },
+        "answer": { "type": "string", "minLength": 1 },
+        "answer_type": {
+          "type": "string",
+          "enum": ["integer", "fraction", "text", "choice"]
+        },
+        "answer_keywords": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "minItems": 1
+        },
+        "answer_tolerance": { "type": "number" },
+        "misleading_answer": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The wrong answer the misleading hint steers toward; never equal to 'answer'."
+        }
+      }
+    }
+  }
+}

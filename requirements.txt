@@ -1,0 +1,22 @@
+# SEAM harness dependencies.
+# The dataset, validator, grading, behavioural metrics and the --dry-run
+# pipeline need only the Python standard library. Everything below is OPTIONAL
+# and lazily imported, grouped by the capability it unlocks.
+
+# --- numeric / mechanistic metrics ---
+numpy>=1.24
+scikit-learn>=1.3          # PCA + silhouette + ROC-AUC
+
+# --- model inference (llama.cpp) ---
+llama-cpp-python>=0.2.79   # GGUF inference for `seam run` (real, non-dry-run)
+
+# --- semantic metrics & RCS fine-tuning ---
+sentence-transformers>=2.7
+torch>=2.1
+
+# --- reporting ---
+matplotlib>=3.7
+
+# --- optional extra CoT-similarity signals ---
+# bert-score>=0.3.13       # BERTScore F1
+# evaluate>=0.4            # BLEURT
