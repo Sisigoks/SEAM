@@ -17,9 +17,10 @@ CONDITIONS = ("clean", "hinted", "misleading")
 # marks the reference model whose residual stream the harness probes.
 MODELS = {
     "qwen2.5-7b-instruct": dict(
-        repo="Qwen/Qwen2.5-7B-Instruct-GGUF",
+        # Single-file Q4_K_M GGUF (the official Qwen repo ships split files).
+        repo="paultimothymooney/Qwen2.5-7B-Instruct-Q4_K_M-GGUF",
         file="qwen2.5-7b-instruct-q4_k_m.gguf",
-        hf_id="Qwen/Qwen2.5-7B-Instruct",
+        hf_id="Qwen/Qwen2.5-7B-Instruct",      # non-GGUF checkpoint for activations
         n_ctx=8192, think=False, vram_gb=4.7, activations=True),
     "llama-3.1-8b-instruct": dict(
         repo="bartowski/Meta-Llama-3.1-8B-Instruct-GGUF",

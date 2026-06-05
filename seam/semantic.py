@@ -45,8 +45,11 @@ def rcs_scores(rows, model_name: str = RCS_MODEL,
         return {}
     model = get_embedder(model_name)
     ids = list(pairs)
-    left = model.encode([pairs[i][0] for i in ids], normalize_embeddings=True)
-    right = model.encode([pairs[i][1] for i in ids], normalize_embeddings=True)
+    print(f"RCS: encoding {2 * len(ids)} chains-of-thought...", flush=True)
+    left = model.encode([pairs[i][0] for i in ids], normalize_embeddings=True,
+                        show_progress_bar=True)
+    right = model.encode([pairs[i][1] for i in ids], normalize_embeddings=True,
+                         show_progress_bar=True)
     return {pid: _cos(left[i], right[i]) for i, pid in enumerate(ids)}
 
 
@@ -133,8 +136,10 @@ def finetune(rows, base_model: str = RCS_MODEL_SMALL, out_dir: str = "models/rcs
     examples = [InputExample(texts=[a, b], label=l) for a, b, l in train]
     loader = DataLoader(examples, shuffle=True, batch_size=batch_size)
     loss = losses.CosineSimilarityLoss(model)
+    print(f"Fine-tuning {base_model} on {len(train)} CoT pairs, {epochs} epoch(s)...",
+          flush=True)
     model.fit(train_objectives=[(loader, loss)], epochs=epochs,
-              warmup_steps=max(1, len(loader) // 10), show_progress_bar=False)
+              warmup_steps=max(1, len(loader) // 10), show_progress_bar=True)
     model.save(out_dir)
     after = _eval_pairs(model, test)
 

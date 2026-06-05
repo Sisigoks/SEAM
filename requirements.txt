@@ -3,6 +3,9 @@
 # pipeline need only the Python standard library. Everything below is OPTIONAL
 # and lazily imported, grouped by the capability it unlocks.
 
+# --- progress reporting (real-time indicators) ---
+tqdm>=4.66                 # falls back to periodic prints if absent
+
 # --- numeric / mechanistic metrics ---
 numpy>=1.24
 scikit-learn>=1.3          # PCA + silhouette + ROC-AUC

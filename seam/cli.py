@@ -9,9 +9,14 @@ from collections import defaultdict
 
 from . import data, grading, metrics, report, runner
 from .config import MODELS
+from .progress import track
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
+
+
+def _banner(msg):
+    print("\n" + "=" * 64 + f"\n  {msg}\n" + "=" * 64, flush=True)
 
 
 def _cmd_models(_):
@@ -31,7 +36,8 @@ def _cmd_run(a):
 
 
 def _cmd_grade(a):
-    rows = [grading.grade_row(r) for r in data.read_jsonl(a.infile)]
+    src = data.read_jsonl(a.infile)
+    rows = [grading.grade_row(r) for r in track(src, desc=f"grade:{os.path.basename(a.infile)}")]
     data.write_jsonl(a.out, rows)
     acc = metrics.accuracy_table(rows)
     print(f"Graded {len(rows)} rows -> {a.out}  | acc " +
@@ -57,7 +63,9 @@ def _cmd_metrics(a):
         by_model[r.get("model", "unknown")].append(r)
 
     summaries = []
-    for model, mrows in by_model.items():
+    for n, (model, mrows) in enumerate(by_model.items(), 1):
+        print(f"[metrics {n}/{len(by_model)}] {model}: {len(mrows)} rows"
+              + (f", bootstrap x{a.bootstrap}" if a.bootstrap else ""), flush=True)
         rcs = None
         if a.rcs:
             from . import semantic
@@ -81,8 +89,10 @@ def _cmd_detect(a):
         import numpy as np
         m, path = spec.split("=", 1)
         acts[m] = np.load(path)
-    results = {m: detectors.compare(mrows, activations=acts.get(m))
-               for m, mrows in by_model.items()}
+    results = {}
+    for n, (m, mrows) in enumerate(by_model.items(), 1):
+        print(f"[detect {n}/{len(by_model)}] {m}: {len(mrows)} rows", flush=True)
+        results[m] = detectors.compare(mrows, activations=acts.get(m))
     with open(a.out, "w", encoding="utf-8", newline="\n") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
     print(f"Wrote detector results for {len(results)} model(s) -> {a.out}\n")
@@ -119,35 +129,69 @@ def _cmd_mech_selftest(_):
 
 
 def _cmd_pipeline(a):
-    """End-to-end run -> grade -> metrics -> report across several models.
+    """End-to-end workflow: run -> grade -> metrics -> detect -> report (+finetune).
 
     GGUFs are resolved from --models-dir using each model's registered filename.
     """
+    from . import detectors as det
     ds = data.load_dataset(a.dataset)
     models = a.models.split(",") if a.models else list(MODELS)
     os.makedirs(os.path.join(a.work, "graded"), exist_ok=True)
     graded_paths = []
-    for m in models:
+
+    _banner(f"STAGE 1-2/5  run + grade  ({len(models)} model(s))")
+    for n, m in enumerate(models, 1):
+        print(f"\n-- model {n}/{len(models)}: {m} --", flush=True)
         rp = os.path.join(a.work, "runs", f"{m}.jsonl")
-        runner.run(ds, m, rp, models_dir=a.models_dir, limit=a.limit, progress=False)
+        runner.run(ds, m, rp, models_dir=a.models_dir, samples=a.samples,
+                   want_logprobs=a.logprobs, limit=a.limit, progress=True)
         gp = os.path.join(a.work, "graded", f"{m}.jsonl")
-        data.write_jsonl(gp, [grading.grade_row(r) for r in data.read_jsonl(rp)])
+        graded = [grading.grade_row(r) for r in track(data.read_jsonl(rp), desc=f"grade:{m}")]
+        data.write_jsonl(gp, graded)
         graded_paths.append(gp)
-    from . import detectors as det
+
     rows = _load_rows(graded_paths)
     by_model = defaultdict(list)
     for r in rows:
         by_model[r["model"]].append(r)
-    summaries = [metrics.summarize(v, k, ci=a.bootstrap) for k, v in by_model.items()]
-    detector_res = {k: det.compare(v) for k, v in by_model.items()}
-    mpath = os.path.join(a.work, "metrics.json")
-    with open(mpath, "w", encoding="utf-8") as f:
+
+    _banner("STAGE 3/5  metrics")
+    summaries = []
+    for n, (m, mrows) in enumerate(by_model.items(), 1):
+        print(f"[metrics {n}/{len(by_model)}] {m}: {len(mrows)} rows"
+              + (f", bootstrap x{a.bootstrap}" if a.bootstrap else ""), flush=True)
+        rcs = None
+        if a.rcs:
+            from . import semantic
+            rcs = semantic.rcs_scores(mrows)
+        summaries.append(metrics.summarize(mrows, m, rcs=rcs, ci=a.bootstrap))
+
+    _banner("STAGE 4/5  detectors")
+    detector_res = {}
+    for n, (m, mrows) in enumerate(by_model.items(), 1):
+        print(f"[detect {n}/{len(by_model)}] {m}: {len(mrows)} rows", flush=True)
+        detector_res[m] = det.compare(mrows)
+
+    _banner("STAGE 5/5  report")
+    with open(os.path.join(a.work, "metrics.json"), "w", encoding="utf-8") as f:
         json.dump(summaries, f, ensure_ascii=False, indent=2)
     with open(os.path.join(a.work, "detectors.json"), "w", encoding="utf-8") as f:
         json.dump(detector_res, f, ensure_ascii=False, indent=2)
     report.generate(summaries, os.path.join(a.work, "report"), detectors=detector_res)
-    print("\n" + report.table_accuracy(summaries))
+
+    if a.finetune:
+        _banner("OPTIONAL  RCS fine-tuning")
+        from . import semantic
+        try:
+            res = semantic.finetune(rows, out_dir=os.path.join(a.work, "models", "rcs-ft"))
+            print(json.dumps(res, indent=2))
+        except Exception as e:
+            print(f"[finetune] skipped: {e}")
+
+    _banner("DONE")
+    print(report.table_accuracy(summaries))
     print("\nDetectors:\n" + report.table_detectors(detector_res))
+    print(f"\nAll outputs in: {os.path.abspath(a.work)}")
 
 
 def build_parser():
@@ -215,7 +259,11 @@ def build_parser():
                     help="dir of GGUFs named per the model registry")
     pl.add_argument("--dataset", default=data.DEFAULT_DATASET)
     pl.add_argument("--limit", type=int, default=None)
-    pl.add_argument("--bootstrap", type=int, default=0)
+    pl.add_argument("--bootstrap", type=int, default=0, help="bootstrap resamples for CIs")
+    pl.add_argument("--samples", type=int, default=1, help="self-consistency samples")
+    pl.add_argument("--logprobs", action="store_true", help="record token-logprob confidence")
+    pl.add_argument("--rcs", action="store_true", help="compute RCS in metrics")
+    pl.add_argument("--finetune", action="store_true", help="also fine-tune the RCS model")
     pl.set_defaults(func=_cmd_pipeline)
     return p
 

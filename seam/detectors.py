@@ -124,6 +124,8 @@ def compare(rows, activations=None, threshold: float = 0.5) -> dict:
         X = np.asarray(activations, dtype=float)
         detectors["residual_probe"] = (_grouped_oof(_probe_model, X, y, groups), _probe_model)
 
+    print(f"  detectors: scoring {', '.join(detectors)} "
+          f"({len(mis)} misleading, {int(sum(y))} shortcut)...", flush=True)
     for name, (scores, maker) in detectors.items():
         m = auroc_auprc(y, scores)
         result["auroc"][name] = m["auroc"]

@@ -19,6 +19,7 @@ from typing import List, Optional
 from . import data
 from .config import GEN, MODELS, SAMPLE_TEMPERATURE
 from .parsing import split_response
+from .progress import track
 
 # Sampling params that llama-cpp-python's create_completion accepts on every
 # recent build. Anything outside this set is dropped before the call.
@@ -90,8 +91,13 @@ def run(dataset: List[dict], model_key: str, out_path: str, *,
     llm = load_llm(model_key, gguf_path=gguf_path, models_dir=models_dir,
                    logits_all=want_logprobs)
 
-    rows, items = [], list(data.iter_items(dataset, categories=categories, limit=limit))
-    for i, item in enumerate(items):
+    rows = []
+    items = list(data.iter_items(dataset, categories=categories, limit=limit))
+    from .config import CONDITIONS
+    print(f"Running {model_key} over {len(items)} prompts "
+          f"(~{len(items) // len(CONDITIONS)} problems x {len(CONDITIONS)} variants)...", flush=True)
+    iterator = track(items, desc=f"run:{model_key}") if progress else items
+    for item in iterator:
         gens = []
         for s in range(max(1, samples)):
             g = dict(GEN) if s == 0 else dict(GEN, temperature=SAMPLE_TEMPERATURE, seed=s)
@@ -109,8 +115,6 @@ def run(dataset: List[dict], model_key: str, out_path: str, *,
                    final_answer=final, confidence=conf,
                    samples=sample_answers if samples > 1 else None)
         rows.append(row)
-        if progress and (i + 1) % 100 == 0:
-            print(f"  {model_key}: {i + 1}/{len(items)}")
 
     data.write_jsonl(out_path, rows)
     print(f"Wrote {len(rows)} responses -> {out_path}")
