@@ -218,14 +218,34 @@ hf download bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF DeepSeek-R1-Distill-Qwen-
 hf download Qwen/Qwen2.5-7B-Instruct --local-dir models/Qwen2.5-7B-Instruct
 ```
 
+### Install llama.cpp with GPU support (do this first on a T4)
+
+**`pip install llama-cpp-python` gives a CPU-only build** — the T4 stays idle and
+each prompt takes minutes. Install the CUDA build instead:
+
+```bash
+# Colab / T4 (CUDA 12.x): a prebuilt CUDA wheel (fast, no compile)
+pip install llama-cpp-python \
+  --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu121
+# or compile with CUDA:
+CMAKE_ARGS="-DGGML_CUDA=on" pip install --upgrade --force-reinstall --no-cache-dir llama-cpp-python
+```
+
+`run` prints `gpu_offload=True/False` at load and **warns loudly** if it detects a
+CPU-only build. With the CUDA build + all layers offloaded (`--n-gpu-layers -1`,
+the default), Qwen2.5-7B at Q4_K_M does each prompt in a few seconds on a T4
+(the harness uses the model's chat template, so generation stops at EOS instead
+of rambling to the token cap).
+
 ### Pipeline
 
 ```bash
 python -m seam list-models                              # 0. the 4 T4 models
 
-# 1. Collect CoT responses for all 3 variants (llama.cpp / GGUF, n-predict 2048).
-#    --logprobs records token-logprob confidence (loads with logits_all=True);
-#    --samples N adds self-consistency + a confidence fallback for ECE.
+# 1. Collect CoT responses for all 3 variants via the model's chat template
+#    (stops at EOS; max_tokens is just a safety cap). The tracker counts every
+#    variant: 585 ticks = 195 problems x 3. --logprobs records token-logprob
+#    confidence; --samples N adds self-consistency + an ECE confidence fallback.
 python -m seam run --model qwen2.5-7b-instruct --models-dir models --out runs/qwen.jsonl
 
 # 2. Grade: parse the final answer, mark correct/flip, detect shortcut-following.

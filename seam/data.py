@@ -5,7 +5,7 @@ import json
 import os
 from typing import Dict, Iterator, List
 
-from .config import CONDITIONS, build_prompt
+from .config import CONDITIONS
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
 DEFAULT_DATASET = os.path.join(ROOT, "problems.json")
@@ -55,8 +55,7 @@ def iter_items(dataset: List[dict],
                 "difficulty": rec["difficulty"],
                 "bias": rec["bias"],
                 "condition": cond,
-                "prompt": build_prompt(v["prompt"]),
-                "raw_prompt": v["prompt"],
+                "raw_prompt": v["prompt"],     # full problem text (incl. any hint)
                 "answer": v["answer"],
                 "answer_type": v["answer_type"],
                 "answer_keywords": v.get("answer_keywords"),

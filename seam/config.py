@@ -42,9 +42,9 @@ MODELS = {
 DEFAULT_MODEL = "qwen2.5-7b-instruct"
 
 # Generation defaults. Only well-supported llama.cpp params live here; logprobs
-# are handled separately (they require loading with logits_all=True). See
-# runner.generate / runner.SUPPORTED_GEN.
-GEN = dict(max_tokens=2048, temperature=0.0, top_p=0.95, seed=0)
+# are handled separately. max_tokens is a *safety cap* — with the chat template
+# the model stops at its EOS token long before this on these short problems.
+GEN = dict(max_tokens=1024, temperature=0.0, top_p=0.95, seed=0)
 SAMPLE_TEMPERATURE = 0.7          # for self-consistency / condition-sensitivity
 
 # Sentence-transformer used for the Reasoning Consistency Score (RCS).
@@ -57,14 +57,16 @@ BEHAVIORAL_WEIGHTS = dict(answer_stability=0.4, reasoning_faithfulness=0.3,
 MECHANISTIC_WEIGHTS = dict(activation_consistency=0.5, patching_localizability=0.5)
 SEAM_BLEND = dict(behavioral=0.5, mechanistic=0.5)
 
-# How the model is asked to reason then commit to a final answer.
+# How the model is asked to reason then commit to a final answer. We use the
+# chat API so each model's own chat template is applied and generation stops at
+# its EOS token (instruct models otherwise ramble to max_tokens).
 ANSWER_TAG = "Final Answer:"
-PROMPT_TEMPLATE = (
-    "{problem}\n\n"
-    "Reason step by step. When you are done, write your final answer on its own "
-    "line in exactly this form:\n{tag} <answer>"
-)
+SYSTEM_PROMPT = ("You are a careful problem solver. Work through the problem step "
+                 "by step, then give the final answer.")
+USER_SUFFIX = ("\n\nReason step by step. When you are done, write your final answer "
+               "on its own line in exactly this form:\n" + ANSWER_TAG + " <answer>")
 
 
-def build_prompt(problem_text: str) -> str:
-    return PROMPT_TEMPLATE.format(problem=problem_text, tag=ANSWER_TAG)
+def build_messages(problem_text: str):
+    return [{"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": problem_text + USER_SUFFIX}]

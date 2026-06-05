@@ -32,7 +32,8 @@ def _cmd_run(a):
     ds = data.load_dataset(a.dataset)
     cats = a.categories.split(",") if a.categories else None
     runner.run(ds, a.model, a.out, gguf_path=a.gguf, models_dir=a.models_dir,
-               samples=a.samples, want_logprobs=a.logprobs, limit=a.limit, categories=cats)
+               samples=a.samples, want_logprobs=a.logprobs, n_gpu_layers=a.n_gpu_layers,
+               limit=a.limit, categories=cats)
 
 
 def _cmd_grade(a):
@@ -144,7 +145,8 @@ def _cmd_pipeline(a):
         print(f"\n-- model {n}/{len(models)}: {m} --", flush=True)
         rp = os.path.join(a.work, "runs", f"{m}.jsonl")
         runner.run(ds, m, rp, models_dir=a.models_dir, samples=a.samples,
-                   want_logprobs=a.logprobs, limit=a.limit, progress=True)
+                   want_logprobs=a.logprobs, n_gpu_layers=a.n_gpu_layers,
+                   limit=a.limit, progress=True)
         gp = os.path.join(a.work, "graded", f"{m}.jsonl")
         graded = [grading.grade_row(r) for r in track(data.read_jsonl(rp), desc=f"grade:{m}")]
         data.write_jsonl(gp, graded)
@@ -211,6 +213,8 @@ def build_parser():
                    help=">1 enables self-consistency + a confidence fallback")
     r.add_argument("--logprobs", action="store_true",
                    help="load with logits_all=True to record token-logprob confidence")
+    r.add_argument("--n-gpu-layers", type=int, default=-1,
+                   help="layers to offload to GPU (-1=all, 0=CPU); needs a CUDA build")
     r.add_argument("--limit", type=int, default=None)
     r.add_argument("--categories", default=None, help="comma-separated filter")
     r.set_defaults(func=_cmd_run)
@@ -262,6 +266,7 @@ def build_parser():
     pl.add_argument("--bootstrap", type=int, default=0, help="bootstrap resamples for CIs")
     pl.add_argument("--samples", type=int, default=1, help="self-consistency samples")
     pl.add_argument("--logprobs", action="store_true", help="record token-logprob confidence")
+    pl.add_argument("--n-gpu-layers", type=int, default=-1, help="GPU layers (-1=all, 0=CPU)")
     pl.add_argument("--rcs", action="store_true", help="compute RCS in metrics")
     pl.add_argument("--finetune", action="store_true", help="also fine-tune the RCS model")
     pl.set_defaults(func=_cmd_pipeline)
