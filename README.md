@@ -267,10 +267,39 @@ python -m seam report --metrics metrics.json --detectors detectors.json --out-di
 # 6. Validate RCS by fine-tuning the sentence-transformer; held-out ROC-AUC.
 python -m seam finetune "graded/*.jsonl" --base-model sentence-transformers/all-MiniLM-L6-v2
 
-# ONE COMMAND for the entire workflow (run -> grade -> metrics -> detect -> report,
-# optionally + RCS fine-tune). Prints a banner + live progress bar per stage:
 python -m seam pipeline --models-dir models --rcs --bootstrap 1000 --finetune --work seam_out
 ```
+
+### One command for the whole workflow
+
+`pipeline` runs **every stage for every model** and writes **all** output folders.
+With no `--models` it runs the entire registry (`seam list-models`), resolving each
+GGUF from `--models-dir`; any model whose GGUF is missing is **skipped with a
+warning** rather than aborting the run.
+
+```bash
+# ALL models, ONE problem (1 problem x 3 variants) — fast end-to-end smoke test
+# that exercises run -> grade -> metrics -> detect -> report (+ fine-tune) and
+# creates every output folder. (`--limit 3` = the first problem's three variants.)
+python -m seam pipeline --models-dir models --limit 3 --rcs --bootstrap 50 --finetune --work seam_out
+
+# Full benchmark, all downloaded models, with 95% CIs and RCS:
+python -m seam pipeline --models-dir models --rcs --bootstrap 1000 --finetune --work seam_out
+```
+
+**Run a single model of your choice** — just pass `--models <key>` (keys from
+`seam list-models`):
+
+```bash
+python -m seam pipeline --models-dir models --models qwen2.5-7b-instruct \
+       --limit 3 --rcs --bootstrap 50 --finetune --work seam_out
+# (the stage-by-stage commands 1-6 above are the same thing unrolled for one model.)
+```
+
+> A single problem (`--limit 3`) makes detector AUROC and bootstrap CIs degenerate
+> (one data point) and fine-tuning is skipped (too few pairs) — that's expected; it
+> verifies the plumbing and produces every file. Drop `--limit` (or use `--limit
+> 60`) for meaningful numbers.
 
 Every stage prints a real-time indicator: `run` and `grade` show a per-item
 progress bar (tqdm in Colab/Jupyter, periodic `i/N (%) it/s eta` lines otherwise);

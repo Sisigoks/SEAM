@@ -144,14 +144,22 @@ def _cmd_pipeline(a):
     for n, m in enumerate(models, 1):
         print(f"\n-- model {n}/{len(models)}: {m} --", flush=True)
         rp = os.path.join(a.work, "runs", f"{m}.jsonl")
-        runner.run(ds, m, rp, models_dir=a.models_dir, samples=a.samples,
-                   want_logprobs=a.logprobs, n_gpu_layers=a.n_gpu_layers,
-                   limit=a.limit, progress=True)
+        try:
+            runner.run(ds, m, rp, models_dir=a.models_dir, samples=a.samples,
+                       want_logprobs=a.logprobs, n_gpu_layers=a.n_gpu_layers,
+                       limit=a.limit, progress=True)
+        except Exception as e:                           # missing GGUF, OOM, etc.
+            print(f"[pipeline] SKIPPING {m}: {e}", flush=True)
+            continue
         gp = os.path.join(a.work, "graded", f"{m}.jsonl")
         graded = [grading.grade_row(r) for r in track(data.read_jsonl(rp), desc=f"grade:{m}")]
         data.write_jsonl(gp, graded)
         graded_paths.append(gp)
 
+    if not graded_paths:
+        print("\n[pipeline] No models ran successfully. Check --models-dir and that "
+              "the GGUF filenames match the registry (see `seam list-models`).")
+        return 1
     rows = _load_rows(graded_paths)
     by_model = defaultdict(list)
     for r in rows:

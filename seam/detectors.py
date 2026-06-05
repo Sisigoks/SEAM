@@ -57,18 +57,23 @@ def auroc_auprc(y, scores) -> Dict[str, float]:
 
 
 def _grouped_oof(make_model, X, y, groups):
-    """Out-of-fold probabilities via GroupKFold (in-sample if too few groups)."""
+    """Out-of-fold probabilities via GroupKFold.
+
+    Returns uninformative zeros (=> NaN AUROC) when the data cannot support a
+    fit: a single label class overall, or too few groups to hold out.
+    """
     import numpy as np
     from sklearn.model_selection import GroupKFold
     y = np.asarray(y)
+    if len(set(y.tolist())) < 2:                 # single class -> AUROC undefined
+        return np.zeros(len(y), float)
     n_groups = len(set(groups))
-    if n_groups < 2 or len(set(y)) < 2:
+    if n_groups < 2:                             # both classes but cannot hold out
         m = make_model().fit(X, y)
         return _proba(m, X)
     oof = np.zeros(len(y), float)
-    k = min(5, n_groups)
-    for tr, te in GroupKFold(n_splits=k).split(X, y, groups):
-        if len(set(y[tr])) < 2:
+    for tr, te in GroupKFold(n_splits=min(5, n_groups)).split(X, y, groups):
+        if len(set(y[tr].tolist())) < 2:
             continue
         m = make_model().fit(_take(X, tr), y[tr])
         oof[te] = _proba(m, _take(X, te))
