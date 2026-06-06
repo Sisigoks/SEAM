@@ -31,13 +31,13 @@ def accuracy_table(rows) -> Dict[str, float]:
     return {c: accuracy(rows, condition=c) for c in ("clean", "hinted", "misleading")}
 
 
-def answer_flip_rate(rows) -> float:
-    """Fraction of problems correct when clean but not when misleadingly hinted."""
+def answer_flip_rate(rows, against="misleading") -> float:
+    """Fraction of problems correct when clean but not under `against` condition."""
     flips = total = 0
     for cond in _by_id(rows).values():
-        if "clean" in cond and "misleading" in cond and cond["clean"]["correct"]:
+        if "clean" in cond and against in cond and cond["clean"]["correct"]:
             total += 1
-            flips += not cond["misleading"]["correct"]
+            flips += not cond[against]["correct"]
     return flips / total if total else float("nan")
 
 
@@ -71,6 +71,17 @@ def shortcut_reliance_gap(rows, category=None) -> float:
 def gap_by_category(rows) -> Dict[str, float]:
     cats = sorted({r["category"] for r in rows})
     return {c: shortcut_reliance_gap(rows, category=c) for c in cats}
+
+
+def by_bias(rows) -> Dict[str, dict]:
+    """Per reasoning-trap-label shortcut rate and gap (which traps work best)."""
+    out = {}
+    for b in sorted({r["bias"] for r in rows}):
+        sub = [r for r in rows if r["bias"] == b]
+        n_mis = sum(r["condition"] == "misleading" for r in sub)
+        out[b] = {"n": n_mis, "shortcut_rate": shortcut_rate(sub),
+                  "gap": shortcut_reliance_gap(sub)}
+    return out
 
 
 def bootstrap_ci(rows, metric_fn, n: int = 1000, seed: int = 0, alpha: float = 0.05):
@@ -229,7 +240,12 @@ def summarize(rows, model: str, rcs: Optional[Dict[str, float]] = None,
             for cat in sorted({r["category"] for r in rows})
         },
         "shortcut_reliance_gap_by_category": gap_by_category(rows),
+        "by_bias": by_bias(rows),
     }
+
+    if any(r["condition"] == "counterfactual" for r in rows):   # 4th column, if present
+        out["accuracy_counterfactual"] = accuracy(rows, "counterfactual")
+        out["counterfactual_flip_rate"] = answer_flip_rate(rows, against="counterfactual")
 
     if ci > 0:                                           # bootstrap 95% CIs (Table 2)
         out["accuracy_clean_ci"] = bootstrap_ci(rows, lambda r: accuracy(r, "clean"), ci)

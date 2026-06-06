@@ -11,7 +11,10 @@ _NUM = re.compile(r"-?\d+(?:\.\d+)?")
 def to_number(s):
     if s is None:
         return None
-    s = str(s).replace(",", "").replace("%", "")
+    s = str(s)
+    for ch in (",", "%", "$", "≈", "~", "≅", "*"):
+        s = s.replace(ch, "")
+    s = s.replace("−", "-")              # unicode minus -> ASCII
     m = _FRAC.search(s)
     if m:
         a, b = m.group().split("/")

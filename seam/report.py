@@ -97,63 +97,75 @@ def save_tables(summaries, out_dir, detectors=None):
             w.writerow(s)
 
 
+def _short(name):
+    return name.split("-")[0]
+
+
+def table_bias(summaries, top=12) -> str:
+    """Per reasoning-trap shortcut rate, pooled across models (which traps win)."""
+    pooled = {}
+    for s in summaries:
+        for b, d in (s.get("by_bias") or {}).items():
+            sr = d.get("shortcut_rate")
+            if sr == sr:
+                pooled.setdefault(b, []).append(sr)
+    rows = sorted(((b, sum(v) / len(v), len(v)) for b, v in pooled.items()),
+                  key=lambda r: -r[1])[:top]
+    return _md_table(["bias / trap", "mean shortcut rate", "#models"],
+                     [[b, _fmt(sr), str(n)] for b, sr, n in rows])
+
+
 # --------------------------------------------------------------------------- #
-# figures (matplotlib lazy; skipped with a note if unavailable)               #
+# figures — compact, black-and-white, ACL style (figstyle)                    #
 # --------------------------------------------------------------------------- #
-def save_figures(summaries, out_dir, detectors=None) -> List[str]:
+def save_figures(summaries, out_dir, detectors=None, confidence=None) -> List[str]:
     try:
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-        import numpy as np
+        from .figstyle import style, save, style_bars, COL, WIDE, HATCHES, MARKERS
+        with style():
+            import matplotlib.pyplot as plt  # noqa: F401  (ensures backend usable)
+            import numpy as np
     except Exception as e:
         print(f"[report] figures skipped (matplotlib unavailable: {e})")
         return []
     ensure_dir(out_dir)
     saved = []
+    from .figstyle import style, save, style_bars, COL, WIDE, HATCHES, MARKERS
+    import numpy as np
+    models = [s["model"] for s in summaries]
 
-    # Fig 2 — Shortcut Reliance Gap heatmap (model x domain).
+    # Fig 2 — Shortcut Reliance Gap heatmap (model x domain), grayscale.
     cats = sorted({c for s in summaries for c in s.get("shortcut_reliance_gap_by_category", {})})
     if cats:
-        M = np.array([[ (s.get("shortcut_reliance_gap_by_category", {}).get(c) or 0.0) * 100
-                        for c in cats] for s in summaries])
-        fig, ax = plt.subplots(figsize=(1.1 * len(cats) + 2, 0.6 * len(summaries) + 1.5))
-        im = ax.imshow(M, cmap="RdBu_r", vmin=-max(1, np.abs(M).max()), vmax=max(1, np.abs(M).max()))
-        ax.set_xticks(range(len(cats))); ax.set_xticklabels(cats, rotation=40, ha="right", fontsize=7)
-        ax.set_yticks(range(len(summaries))); ax.set_yticklabels([s["model"] for s in summaries], fontsize=7)
-        for i in range(M.shape[0]):
-            for j in range(M.shape[1]):
-                ax.text(j, i, f"{M[i,j]:.0f}", ha="center", va="center", fontsize=7)
-        ax.set_title("Fig 2 — Shortcut Reliance Gap (pp) by model x domain")
-        fig.colorbar(im, ax=ax, fraction=0.025); plt.tight_layout()
-        p = os.path.join(out_dir, "fig2_gap_heatmap.png"); fig.savefig(p, dpi=130); plt.close(fig)
-        saved.append(p)
+        M = np.array([[(s.get("shortcut_reliance_gap_by_category", {}).get(c) or 0.0) * 100
+                       for c in cats] for s in summaries])
+        with style():
+            import matplotlib.pyplot as plt
+            fig, ax = plt.subplots(figsize=(min(WIDE, 0.5 * len(cats) + 1.6), 0.42 * len(models) + 1.1))
+            vmax = max(1.0, float(np.abs(M).max()))
+            im = ax.imshow(np.abs(M), cmap="Greys", vmin=0, vmax=vmax, aspect="auto")
+            ax.set_xticks(range(len(cats))); ax.set_xticklabels([c[:10] for c in cats], rotation=40, ha="right")
+            ax.set_yticks(range(len(models))); ax.set_yticklabels([_short(m) for m in models])
+            for i in range(M.shape[0]):
+                for j in range(M.shape[1]):
+                    v = M[i, j]
+                    ax.text(j, i, f"{v:.0f}", ha="center", va="center",
+                            color="white" if abs(v) > 0.6 * vmax else "black", fontsize=6.5)
+            ax.set_title("Shortcut Reliance Gap (pp)")
+            saved.append(save(fig, os.path.join(out_dir, "fig2_gap_heatmap.png")))
 
-    # Fig 3 — failure-type stacked bar.
-    fig, ax = plt.subplots(figsize=(8, 4))
-    models = [s["model"] for s in summaries]
-    bottom = np.zeros(len(models))
-    for ft in FAIL_TYPES:
-        vals = np.array([s.get("failure_taxonomy", {}).get(ft, 0) for s in summaries], float)
-        ax.bar(models, vals, bottom=bottom, label=ft)
-        bottom += vals
-    ax.set_ylabel("count"); ax.set_title("Fig 3 — Failure profile per model")
-    ax.legend(fontsize=7); plt.xticks(rotation=30, ha="right"); plt.tight_layout()
-    p = os.path.join(out_dir, "fig3_failures.png"); fig.savefig(p, dpi=130); plt.close(fig)
-    saved.append(p)
-
-    # Fig 8 — behavioural vs mechanistic SEAM scatter (quadrant view).
-    fig, ax = plt.subplots(figsize=(5, 5))
-    for s in summaries:
-        x, y = s.get("seam_behavioral"), s.get("seam_mechanistic")
-        if x is None or y is None or (isinstance(y, float) and y != y):
-            y = 0.0 if (y is None or y != y) else y
-        ax.scatter(x, y); ax.annotate(s["model"], (x, y), fontsize=7)
-    ax.set_xlabel("behavioural SEAM"); ax.set_ylabel("mechanistic SEAM")
-    ax.set_title("Fig 8 — SEAM model ranking"); ax.axhline(.5, ls=":"); ax.axvline(.5, ls=":")
-    plt.tight_layout()
-    p = os.path.join(out_dir, "fig8_seam_scatter.png"); fig.savefig(p, dpi=130); plt.close(fig)
-    saved.append(p)
+    # Fig 3 — failure-type stacked bar (grayscale + hatches).
+    with style():
+        import matplotlib.pyplot as plt
+        fig, ax = plt.subplots(figsize=(COL, 2.3))
+        bottom = np.zeros(len(models))
+        for k, ft in enumerate(FAIL_TYPES):
+            vals = np.array([s.get("failure_taxonomy", {}).get(ft, 0) for s in summaries], float)
+            bars = ax.bar(range(len(models)), vals, bottom=bottom, label=ft.replace("_", " "))
+            style_bars(bars, k); bottom += vals
+        ax.set_xticks(range(len(models))); ax.set_xticklabels([_short(m) for m in models], rotation=25, ha="right")
+        ax.set_ylabel("count"); ax.legend(ncol=2, loc="upper center", bbox_to_anchor=(0.5, 1.28))
+        ax.set_title("Failure profile")
+        saved.append(save(fig, os.path.join(out_dir, "fig3_failures.png")))
 
     # Fig 4 — detector comparison (held-out AUROC), pooled across models.
     if detectors:
@@ -163,21 +175,80 @@ def save_figures(summaries, out_dir, detectors=None) -> List[str]:
                 if v == v:
                     auroc.setdefault(name, []).append(v)
         if auroc:
-            names = sorted(auroc)
+            names = sorted(auroc, key=lambda n: np.mean(auroc[n]))
             means = [float(np.mean(auroc[n])) for n in names]
-            fig, ax = plt.subplots(figsize=(6, 0.6 * len(names) + 1.5))
-            ax.barh(names, means)
-            for i, v in enumerate(means):
-                ax.text(v + 0.01, i, f"{v:.3f}", va="center", fontsize=8)
-            ax.set_xlim(0, 1.05); ax.set_xlabel("AUROC")
-            ax.set_title("Fig 4 — Shortcut detection (grouped held-out)")
-            plt.tight_layout()
-            p = os.path.join(out_dir, "fig4_detectors.png"); fig.savefig(p, dpi=130); plt.close(fig)
+            with style():
+                import matplotlib.pyplot as plt
+                fig, ax = plt.subplots(figsize=(COL, 0.45 * len(names) + 1.0))
+                bars = ax.barh(range(len(names)), means)
+                style_bars(bars, 0)
+                ax.set_yticks(range(len(names))); ax.set_yticklabels([n.replace("_", " ") for n in names])
+                for i, v in enumerate(means):
+                    ax.text(min(v + 0.015, 1.0), i, f"{v:.3f}", va="center", fontsize=7)
+                ax.set_xlim(0, 1.06); ax.set_xlabel("held-out AUROC")
+                ax.set_title("Shortcut detection")
+                saved.append(save(fig, os.path.join(out_dir, "fig4_detectors.png")))
+
+    # Fig 5 — residual-probe AUROC by layer (mechanistic localization).
+    layer_src = next((res for res in (detectors or {}).values() if res.get("layer_auroc")), None)
+    if layer_src:
+        from . import detectors as det
+        la = {int(k): v for k, v in layer_src["layer_auroc"].items()}
+        base = {}
+        for n in ("cot_tfidf", "cot_lexical"):
+            vals = [r["auroc"].get(n) for r in detectors.values() if r["auroc"].get(n) == r["auroc"].get(n)]
+            if vals:
+                base[n] = float(np.mean(vals))
+        saved.append(det.plot_layer_sweep(la, os.path.join(out_dir, "fig5_layer_sweep.png"),
+                                          text_baselines=base))
+
+    # Fig 6 — susceptibility vs. confidence (the confidence analysis).
+    if confidence:
+        from . import confidence as conf
+        p = conf.plot(confidence, os.path.join(out_dir, "fig6_confidence.png"))
+        if p:
             saved.append(p)
-    return saved
+
+    # Fig 7 — top reasoning-trap shortcut rates (per-bias finding), grayscale.
+    pooled = {}
+    for s in summaries:
+        for b, d in (s.get("by_bias") or {}).items():
+            if d.get("shortcut_rate") == d.get("shortcut_rate"):
+                pooled.setdefault(b, []).append(d["shortcut_rate"])
+    if pooled:
+        items = sorted(((b, sum(v) / len(v)) for b, v in pooled.items()), key=lambda r: r[1])[-10:]
+        with style():
+            import matplotlib.pyplot as plt
+            fig, ax = plt.subplots(figsize=(COL, 0.32 * len(items) + 0.9))
+            bars = ax.barh([b.replace("_", " ") for b, _ in items], [v for _, v in items])
+            style_bars(bars, 1)
+            ax.set_xlabel("mean shortcut rate"); ax.set_xlim(0, 1.0)
+            ax.set_title("Most-effective reasoning traps")
+            saved.append(save(fig, os.path.join(out_dir, "fig7_bias.png")))
+
+    # Fig 8 — behavioural vs mechanistic SEAM scatter (quadrant view).
+    with style():
+        import matplotlib.pyplot as plt
+        fig, ax = plt.subplots(figsize=(COL, 2.6))
+        for i, s in enumerate(summaries):
+            x, y = s.get("seam_behavioral"), s.get("seam_mechanistic")
+            y = 0.0 if (y is None or (isinstance(y, float) and y != y)) else y
+            x = 0.0 if (x is None or (isinstance(x, float) and x != x)) else x
+            ax.scatter(x, y, marker=MARKERS[i % len(MARKERS)], color="black", s=18)
+            ax.annotate(_short(s["model"]), (x, y), fontsize=6.5, xytext=(3, 3),
+                        textcoords="offset points")
+        ax.set_xlabel("behavioural SEAM"); ax.set_ylabel("mechanistic SEAM")
+        ax.axhline(.5, ls=":", color="0.6", lw=0.7); ax.axvline(.5, ls=":", color="0.6", lw=0.7)
+        ax.set_xlim(0, 1); ax.set_ylim(0, 1); ax.set_title("SEAM ranking")
+        saved.append(save(fig, os.path.join(out_dir, "fig8_seam_scatter.png")))
+
+    return [p for p in saved if p]
 
 
-def generate(summaries, out_dir, detectors=None):
+def generate(summaries, out_dir, detectors=None, confidence=None):
     save_tables(summaries, out_dir, detectors=detectors)
-    figs = save_figures(summaries, out_dir, detectors=detectors)
+    if any(s.get("by_bias") for s in summaries):
+        with open(os.path.join(out_dir, "table4_bias.md"), "w", encoding="utf-8") as f:
+            f.write("### Table 4 — Most-effective reasoning traps\n\n" + table_bias(summaries) + "\n")
+    figs = save_figures(summaries, out_dir, detectors=detectors, confidence=confidence)
     print(f"[report] wrote tables + {len(figs)} figure(s) -> {out_dir}")

@@ -31,9 +31,21 @@ def _cmd_models(_):
 def _cmd_run(a):
     ds = data.load_dataset(a.dataset)
     cats = a.categories.split(",") if a.categories else None
-    runner.run(ds, a.model, a.out, gguf_path=a.gguf, models_dir=a.models_dir,
+    items = data.read_jsonl(a.items) if a.items else None
+    runner.run(ds, a.model, a.out, items=items, gguf_path=a.gguf, models_dir=a.models_dir,
                samples=a.samples, want_logprobs=a.logprobs, n_gpu_layers=a.n_gpu_layers,
                limit=a.limit, categories=cats)
+
+
+def _cmd_counterfactual(a):
+    from . import counterfactual as cf
+    rows = [grading.grade_row(r) if "label" not in r else r for r in _load_rows(a.infiles)]
+    if a.model:
+        rows = [r for r in rows if r.get("model") == a.model]
+    items = cf.build_items(rows)
+    data.write_jsonl(a.out, items)
+    print(f"Built {len(items)} counterfactual items -> {a.out}\n"
+          f"Next: seam run --model <key> --models-dir models --items {a.out} --out runs/cf.jsonl")
 
 
 def _cmd_grade(a):
@@ -80,20 +92,21 @@ def _cmd_metrics(a):
 
 
 def _cmd_detect(a):
-    from . import detectors
+    from . import detectors, activations as act
     rows = [grading.grade_row(r) if "label" not in r else r for r in _load_rows(a.infiles)]
     by_model = defaultdict(list)
     for r in rows:
         by_model[r.get("model", "unknown")].append(r)
     acts = {}
-    for spec in (a.activations or []):                   # "model=path.npy"
-        import numpy as np
+    for spec in (a.activations or []):                   # "model=path.npz|.npy"
         m, path = spec.split("=", 1)
-        acts[m] = np.load(path)
+        X, ids, _ = act.load(path)
+        acts[m] = (X, ids)
     results = {}
     for n, (m, mrows) in enumerate(by_model.items(), 1):
         print(f"[detect {n}/{len(by_model)}] {m}: {len(mrows)} rows", flush=True)
-        results[m] = detectors.compare(mrows, activations=acts.get(m))
+        X, ids = acts.get(m, (None, None))
+        results[m] = detectors.compare(mrows, activations=X, activation_ids=ids)
     with open(a.out, "w", encoding="utf-8", newline="\n") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
     print(f"Wrote detector results for {len(results)} model(s) -> {a.out}\n")
@@ -105,6 +118,41 @@ def _cmd_det_selftest(_):
     print(json.dumps(detectors.selftest(), indent=2))
 
 
+def _cmd_extract(a):
+    from . import activations as act
+    rows = [grading.grade_row(r) if "label" not in r else r for r in _load_rows(a.infiles)]
+    rows = [r for r in rows if r.get("condition") == a.condition
+            and (not a.model or r.get("model") == a.model)]
+    if not rows:
+        print("No matching rows (check --model / --condition).")
+        return 1
+    hf_id = a.hf_id or MODELS.get(a.model, {}).get("hf_id")
+    if not hf_id:
+        print("No hf_id for this model; pass --hf-id <HF checkpoint>.")
+        return 1
+    layers = [int(x) for x in a.layers.split(",")] if a.layers else None
+    X, ids, lyr = act.extract_activations(rows, hf_id, layers=layers, dtype=a.dtype,
+                                          load_4bit=a.load_4bit)
+    act.save(a.out, X, ids, lyr)
+
+
+def _cmd_confidence(a):
+    from . import confidence as conf
+    rows = [grading.grade_row(r) if "label" not in r else r for r in _load_rows(a.infiles)]
+    by_model = defaultdict(list)
+    for r in rows:
+        by_model[r.get("model", "unknown")].append(r)
+    analysis = conf.analyze(by_model, proxy=a.proxy, bins=a.bins)
+    with open(a.out, "w", encoding="utf-8", newline="\n") as f:
+        json.dump(analysis, f, ensure_ascii=False, indent=2)
+    if a.fig:
+        conf.plot(analysis, a.fig)
+    print(f"Wrote confidence analysis -> {a.out}\n")
+    for m, res in analysis.items():
+        bs = ", ".join(f"{b['bucket']}:{b['flip_rate']:.2f}" for b in res.get("buckets", []))
+        print(f"  {m}: r(conf,flip)={res.get('point_biserial'):.3f} | n={res.get('n')} | flip[{bs}]")
+
+
 def _cmd_report(a):
     with open(a.metrics, encoding="utf-8") as f:
         summaries = json.load(f)
@@ -112,7 +160,11 @@ def _cmd_report(a):
     if a.detectors and os.path.exists(a.detectors):
         with open(a.detectors, encoding="utf-8") as f:
             detectors = json.load(f)
-    report.generate(summaries, a.out_dir, detectors=detectors)
+    confidence = None
+    if a.confidence and os.path.exists(a.confidence):
+        with open(a.confidence, encoding="utf-8") as f:
+            confidence = json.load(f)
+    report.generate(summaries, a.out_dir, detectors=detectors, confidence=confidence)
 
 
 def _cmd_finetune(a):
@@ -183,11 +235,16 @@ def _cmd_pipeline(a):
         detector_res[m] = det.compare(mrows)
 
     _banner("STAGE 5/5  report")
+    from . import confidence as conf
+    conf_analysis = conf.analyze(by_model)
     with open(os.path.join(a.work, "metrics.json"), "w", encoding="utf-8") as f:
         json.dump(summaries, f, ensure_ascii=False, indent=2)
     with open(os.path.join(a.work, "detectors.json"), "w", encoding="utf-8") as f:
         json.dump(detector_res, f, ensure_ascii=False, indent=2)
-    report.generate(summaries, os.path.join(a.work, "report"), detectors=detector_res)
+    with open(os.path.join(a.work, "confidence.json"), "w", encoding="utf-8") as f:
+        json.dump(conf_analysis, f, ensure_ascii=False, indent=2)
+    report.generate(summaries, os.path.join(a.work, "report"),
+                    detectors=detector_res, confidence=conf_analysis)
 
     if a.finetune:
         _banner("OPTIONAL  RCS fine-tuning")
@@ -223,9 +280,17 @@ def build_parser():
                    help="load with logits_all=True to record token-logprob confidence")
     r.add_argument("--n-gpu-layers", type=int, default=-1,
                    help="layers to offload to GPU (-1=all, 0=CPU); needs a CUDA build")
+    r.add_argument("--items", default=None,
+                   help="run a pre-built work-item JSONL (e.g. counterfactual) instead of the dataset")
     r.add_argument("--limit", type=int, default=None)
     r.add_argument("--categories", default=None, help="comma-separated filter")
     r.set_defaults(func=_cmd_run)
+
+    cfp = sub.add_parser("counterfactual", help="build the counterfactual condition (4th column)")
+    cfp.add_argument("infiles", nargs="+", help="graded JSONL (needs clean + misleading)")
+    cfp.add_argument("--model", default=None, help="restrict to one model's rows")
+    cfp.add_argument("--out", required=True, help="counterfactual work-item JSONL")
+    cfp.set_defaults(func=_cmd_counterfactual)
 
     g = sub.add_parser("grade", help="grade responses, detect flips/shortcuts")
     g.add_argument("infile"); g.add_argument("--out", required=True)
@@ -250,9 +315,29 @@ def build_parser():
     sub.add_parser("det-selftest", help="run detectors on synthetic data"
                    ).set_defaults(func=_cmd_det_selftest)
 
+    ex = sub.add_parser("extract", help="extract residual-stream activations (HF, for the probe)")
+    ex.add_argument("infiles", nargs="+", help="graded JSONL")
+    ex.add_argument("--model", required=True, help="registry key (provides hf_id)")
+    ex.add_argument("--hf-id", default=None, help="override HF checkpoint")
+    ex.add_argument("--condition", default="misleading")
+    ex.add_argument("--layers", default=None, help="comma-separated layer indices (default: all)")
+    ex.add_argument("--dtype", default="float16")
+    ex.add_argument("--load-4bit", action="store_true", help="4-bit load for big checkpoints")
+    ex.add_argument("--out", required=True, help="output .npz")
+    ex.set_defaults(func=_cmd_extract)
+
+    cf = sub.add_parser("confidence", help="confidence -> shortcut-susceptibility analysis")
+    cf.add_argument("infiles", nargs="+")
+    cf.add_argument("--out", default="confidence.json")
+    cf.add_argument("--fig", default=None, help="optional PNG path")
+    cf.add_argument("--proxy", default="auto", choices=["auto", "logprob", "consistency", "hedging"])
+    cf.add_argument("--bins", type=int, default=3)
+    cf.set_defaults(func=_cmd_confidence)
+
     rp = sub.add_parser("report", help="render tables + figures")
     rp.add_argument("--metrics", default="metrics.json"); rp.add_argument("--out-dir", default="report")
-    rp.add_argument("--detectors", default=None, help="detectors.json for Table 3 / Fig 4")
+    rp.add_argument("--detectors", default=None, help="detectors.json for Table 3 / Fig 4-5")
+    rp.add_argument("--confidence", default=None, help="confidence.json for Fig 6")
     rp.set_defaults(func=_cmd_report)
 
     ft = sub.add_parser("finetune", help="fine-tune the RCS sentence-transformer")

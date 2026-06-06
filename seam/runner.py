@@ -109,22 +109,23 @@ def _consistency_confidence(answers: List[str]) -> Optional[float]:
     return c.most_common(1)[0][1] / sum(c.values())
 
 
-def run(dataset: List[dict], model_key: str, out_path: str, *,
-        gguf_path=None, models_dir=None, samples=1, want_logprobs=False,
+def run(dataset, model_key: str, out_path: str, *,
+        items=None, gguf_path=None, models_dir=None, samples=1, want_logprobs=False,
         n_gpu_layers=-1, limit=None, categories=None, progress=True) -> str:
-    """Run one model over the dataset and write a responses JSONL.
+    """Run one model and write a responses JSONL.
 
-    Confidence comes from token logprobs when `want_logprobs` is set; otherwise,
-    with `samples>1`, it falls back to the self-consistency agreement rate.
+    By default iterates the dataset (clean/hinted/misleading). Pass `items` (e.g.
+    counterfactual work-items, each with `raw_prompt`) to run a custom prompt set.
+    Confidence comes from token logprobs (`want_logprobs`); otherwise, with
+    `samples>1`, it falls back to the self-consistency agreement rate.
     """
     llm = load_llm(model_key, gguf_path=gguf_path, models_dir=models_dir,
                    logits_all=want_logprobs, n_gpu_layers=n_gpu_layers)
 
     rows = []
-    items = list(data.iter_items(dataset, categories=categories, limit=limit))
-    from .config import CONDITIONS
-    print(f"Running {model_key} over {len(items)} prompts "
-          f"(~{len(items) // len(CONDITIONS)} problems x {len(CONDITIONS)} variants)...", flush=True)
+    if items is None:
+        items = list(data.iter_items(dataset, categories=categories, limit=limit))
+    print(f"Running {model_key} over {len(items)} prompts...", flush=True)
     iterator = track(items, desc=f"run:{model_key}") if progress else items
     for item in iterator:
         messages = build_messages(item["raw_prompt"])

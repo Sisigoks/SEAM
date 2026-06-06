@@ -21,6 +21,11 @@ scikit-learn>=1.3          # PCA + silhouette + ROC-AUC
 sentence-transformers>=2.7
 torch>=2.1
 
+# --- mechanistic: residual-stream activation extraction (`seam extract`) ---
+transformers>=4.44
+accelerate>=0.33
+# bitsandbytes>=0.43       # only for --load-4bit on large checkpoints (32B)
+
 # --- reporting ---
 matplotlib>=3.7
 

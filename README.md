@@ -25,10 +25,14 @@ seam/                         # evaluation harness (see "Evaluation harness")
   config.py                   #   model registry, prompt template, metric weights
   runner.py                   #   llama.cpp (GGUF) inference
   parsing.py grading.py       #   CoT/answer parsing; answer matching + labels
-  metrics.py                  #   behavioural metrics, gap, bootstrap CIs, SEAM
-  detectors.py                #   shortcut detectors (lexical/TF-IDF/residual) + AUROC
+  metrics.py                  #   behavioural metrics, gap, bootstrap CIs, by-bias, SEAM
+  detectors.py                #   shortcut detectors (lexical/TF-IDF/residual) + per-layer AUROC
+  activations.py              #   HF residual-stream extraction (for the probe)
+  confidence.py               #   confidence -> shortcut-susceptibility analysis
+  counterfactual.py           #   builds the 4th (counterfactual) condition
   semantic.py                 #   RCS (sentence-transformer) + RCS fine-tuning
   mechanistic.py              #   silhouette / SAE-delta / patching / localization
+  figstyle.py                 #   compact black-and-white ACL figure style
   report.py cli.py            #   tables + figures; `python -m seam` entry point
 requirements.txt              # optional, lazily-imported dependencies
 LICENSE  CITATION.cff  README.md
@@ -204,6 +208,7 @@ uses).
 | `llama-3.1-8b-instruct` | 8B | ~4.9 GB | yes | — |
 | `mistral-7b-instruct-v0.3` | 7B | ~4.4 GB | yes | — |
 | `deepseek-r1-distill-qwen-7b` | 7B | ~4.7 GB | yes (`<think>`) | — |
+| `qwen2.5-32b-instruct` *(scale ablation; L40S/A100)* | 32B | ~20 GB | yes | — |
 
 Download the GGUFs into `models/` (filenames match the registry):
 
@@ -309,6 +314,62 @@ absolute path to all outputs.
 
 > On PowerShell/cmd, quote globs (`"graded/*.jsonl"`) — the CLI expands them itself.
 
+### MIT-level experiment plan (single L40S, ~4 hours)
+
+This sequence produces the behavioural **and** mechanistic results — including the
+residual-probe layer sweep, the confidence→susceptibility analysis, the
+counterfactual condition, and the per-bias breakdown — in compact B&W ACL
+figures. Times are rough for an L40S (48 GB).
+
+```bash
+# (0) Installs: CUDA llama.cpp + the HF stack for activation extraction. (~5 min)
+pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu121
+pip install -U transformers accelerate sentence-transformers scikit-learn matplotlib tqdm
+
+# (1) Models: the four 7-8B GGUFs (see download block above) + the HF checkpoint
+#     for activations + (optional) the 32B scale model.            (~20 min DL)
+hf download Qwen/Qwen2.5-7B-Instruct --local-dir models/Qwen2.5-7B-Instruct
+hf download bartowski/Qwen2.5-32B-Instruct-GGUF Qwen2.5-32B-Instruct-Q4_K_M.gguf --local-dir models
+
+# (2) Behavioural run for the four T4-class models, WITH logprobs (for confidence
+#     + ECE). ~195x3 prompts each; a few seconds/prompt on an L40S.   (~60-90 min)
+for M in qwen2.5-7b-instruct llama-3.1-8b-instruct mistral-7b-instruct-v0.3 deepseek-r1-distill-qwen-7b; do
+  python -m seam run --model $M --models-dir models --out runs/$M.jsonl --logprobs
+  python -m seam grade runs/$M.jsonl --out graded/$M.jsonl
+done
+
+# (3) MECHANISTIC — extract Qwen's residual stream on the misleading condition,
+#     then run the per-layer probe vs. text detectors.               (~15 min)
+python -m seam extract graded/qwen2.5-7b-instruct.jsonl --model qwen2.5-7b-instruct \
+       --condition misleading --out acts/qwen_misleading.npz
+python -m seam detect "graded/*.jsonl" --out detectors.json \
+       --activations qwen2.5-7b-instruct=acts/qwen_misleading.npz
+
+# (4) Behavioural metrics with 95% CIs + RCS; confidence analysis.    (~10 min)
+python -m seam metrics "graded/*.jsonl" --out metrics.json --rcs --bootstrap 1000
+python -m seam confidence "graded/*.jsonl" --out confidence.json --proxy logprob
+
+# (5) COUNTERFACTUAL condition (4th column): build from Qwen's clean CoT, run,
+#     grade, fold into metrics.                                       (~20 min)
+python -m seam counterfactual graded/qwen2.5-7b-instruct.jsonl --model qwen2.5-7b-instruct --out cf/qwen.jsonl
+python -m seam run --model qwen2.5-7b-instruct --models-dir models --items cf/qwen.jsonl --out runs/qwen_cf.jsonl --logprobs
+python -m seam grade runs/qwen_cf.jsonl --out graded/qwen_cf.jsonl
+python -m seam metrics graded/qwen2.5-7b-instruct.jsonl graded/qwen_cf.jsonl --out metrics_qwen.json --bootstrap 1000
+
+# (6) SCALE ablation — does the gap hold at 32B? Run a 60-problem subset. (~25 min)
+python -m seam run --model qwen2.5-32b-instruct --models-dir models --limit 180 --out runs/qwen32.jsonl
+python -m seam grade runs/qwen32.jsonl --out graded/qwen32.jsonl
+
+# (7) Final report: Tables 2-4 + Figs 2-8 (B&W ACL).                  (~2 min)
+python -m seam report --metrics metrics.json --detectors detectors.json \
+       --confidence confidence.json --out-dir report/
+```
+
+The headline result lives in `report/fig5_layer_sweep.png` + `table3_detectors.md`:
+**if the residual probe beats the best text detector** (especially on Mistral, where
+text detectors collapse), that is the paper's finding — internal representations
+detect silent shortcuts that chain-of-thought text cannot.
+
 **Metrics implemented.**
 
 | Block | Metric | Where |
@@ -319,8 +380,14 @@ absolute path to all outputs.
 | | **Bootstrap 95% CIs over base-problem IDs** (`--bootstrap N`) | `metrics.bootstrap_ci` |
 | | Condition Sensitivity (KL); ECE; Self-consistency (`--samples N`) | `metrics.condition_sensitivity` / `expected_calibration_error` / `self_consistency` |
 | | Failure taxonomy (answer-flip / reasoning-flip / silent-shortcut / confabulation) | `metrics.failure_taxonomy` |
+| | **Per reasoning-trap (bias) shortcut rate** (Table 4, Fig 7) | `metrics.by_bias` |
+| | **Counterfactual accuracy + flip rate** (4th condition) | `metrics.summarize`, `counterfactual` |
 | Detectors (RQ3) | CoT lexical / TF-IDF / residual probe — grouped held-out AUROC & AUPRC (Fig 4) | `detectors.compare` |
+| | **Residual-probe layer sweep + best layer** (localization, Fig 5) | `detectors.compare`, `plot_layer_sweep` |
 | | Flagged-among-correct = observable RWRR rate (Fig 3) | `detectors.compare` |
+| | LLM-judge detector (optional, bring your own judge fn) | `detectors.llm_judge_scores` |
+| Susceptibility | **Confidence → flip-rate** by tertile + point-biserial r (Fig 6) | `confidence.susceptibility` |
+| Mechanistic | **Residual-stream extraction** (HF, per-layer, last token) | `activations.extract_activations` |
 | Semantic | RCS = cosine(CoT_clean, CoT_misleading); fine-tuning + ROC-AUC | `semantic.rcs_scores`, `semantic.finetune` |
 | | BERTScore, NLI entailment, coverage (optional) | `semantic.bertscore_f1` / `nli_entailment` / `coverage_score` |
 | Mechanistic | activation silhouette; SAE feature delta; patching logit diff; causal localization | `mechanistic.*` |
@@ -343,14 +410,17 @@ hidden. With the commands above:
 |------|-----------|----------|
 | `runs/<model>.jsonl` | `run` | one row per (problem, variant): `response`, `cot`, `final_answer`, `confidence` |
 | `graded/<model>.jsonl` | `grade` | the above + `correct`, `label`, `followed_shortcut` |
-| `metrics.json` | `metrics` | per-model summary: accuracies (+CIs), gap, AFR, ECE, RCS, SEAM, failure taxonomy |
-| `detectors.json` | `detect` | per-model detector AUROC / AUPRC / flagged-among-correct |
+| `acts/<model>_*.npz` | `extract` | per-layer residual-stream activations + row ids |
+| `cf/<model>.jsonl` | `counterfactual` | counterfactual work-items (4th condition prompts) |
+| `metrics.json` | `metrics` | per-model: accuracies (+CIs), gap, AFR, ECE, RCS, SEAM, by-bias, counterfactual |
+| `detectors.json` | `detect` | detector AUROC/AUPRC/flagged + `layer_auroc` + `best_layer` |
+| `confidence.json` | `confidence` | per-model flip-rate by confidence tertile + point-biserial r |
 | `report/table2_accuracy.md` | `report` | Table 2 (accuracy × condition + Shortcut Reliance Gap, with CIs) |
 | `report/table3_detectors.md` | `report` | Table 3 (detector comparison) |
+| `report/table4_bias.md` | `report` | Table 4 (most-effective reasoning traps) |
 | `report/table_failures.md` | `report` | failure-type taxonomy |
 | `report/summary.csv` | `report` | flat per-model table (open in any spreadsheet) |
-| `report/fig2_gap_heatmap.png` | `report` | Shortcut Reliance Gap by model × domain |
-| `report/fig3_failures.png`, `fig4_detectors.png`, `fig8_seam_scatter.png` | `report` | figures |
+| `report/fig2_gap_heatmap.png` … `fig8_seam_scatter.png` | `report` | compact B&W ACL figures (gap heatmap, failures, detectors, **layer sweep**, **confidence**, **per-bias**, SEAM scatter) |
 | `models/rcs-ft/` | `finetune` | fine-tuned sentence-transformer + before/after AUROC |
 
 `report/` and `summary.csv` are the human-facing outputs; `metrics.json` /

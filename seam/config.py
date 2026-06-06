@@ -1,10 +1,10 @@
 """Model registry, generation defaults, prompt template, and metric weights.
 
-Model registry is restricted to models that fit on a single NVIDIA T4 (16 GB)
-at Q4_K_M and whose chain-of-thought the harness can record. Qwen2.5-7B-Instruct
-is the reference model: it is the default and the only one for which we also
-support HF activation extraction (the residual probe in `mechanistic` /
-`detectors`). The others are available for behavioural comparison.
+The core registry holds models that fit on a single NVIDIA T4 (16 GB) at Q4_K_M,
+plus `qwen2.5-32b-instruct` for the scale ablation (needs an L40S/A100).
+Qwen2.5-7B-Instruct is the reference model: the default, and the one for which we
+support HF activation extraction (the residual probe in `activations` /
+`detectors`). The others are for behavioural comparison.
 """
 from __future__ import annotations
 
@@ -37,6 +37,12 @@ MODELS = {
         file="DeepSeek-R1-Distill-Qwen-7B-Q4_K_M.gguf",
         hf_id="deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
         n_ctx=16384, think=True, vram_gb=4.7, activations=False),
+    # Scale ablation: needs an L40S/A100 (does the gap hold at 32B?). Not T4.
+    "qwen2.5-32b-instruct": dict(
+        repo="bartowski/Qwen2.5-32B-Instruct-GGUF",
+        file="Qwen2.5-32B-Instruct-Q4_K_M.gguf",
+        hf_id="Qwen/Qwen2.5-32B-Instruct",
+        n_ctx=8192, think=False, vram_gb=20.0, activations=False),
 }
 
 DEFAULT_MODEL = "qwen2.5-7b-instruct"
