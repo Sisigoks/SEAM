@@ -16,7 +16,6 @@ scikit-learn>=1.3          # PCA + silhouette + ROC-AUC
 #   pip install llama-cpp-python --extra-index-url \
 #     https://abetlen.github.io/llama-cpp-python/whl/cu121
 # or:  CMAKE_ARGS="-DGGML_CUDA=on" pip install --force-reinstall --no-cache-dir llama-cpp-python
-llama-cpp-python>=0.2.79   # GGUF chat-completion inference for `seam run`
 
 # --- semantic metrics & RCS fine-tuning ---
 sentence-transformers>=2.7
