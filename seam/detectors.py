@@ -138,6 +138,11 @@ def compare(rows, activations=None, activation_ids=None, threshold: float = 0.5)
 
     if activations is not None:
         _residual_probe(result, mis, y, groups, activations, activation_ids, threshold)
+
+    text = [v for k, v in result["auroc"].items() if k.startswith("cot_") and v == v]
+    rp = result["auroc"].get("residual_probe")
+    if rp is not None and rp == rp and text:        # how much the probe beats text
+        result["probe_advantage"] = rp - max(text)
     return result
 
 
@@ -225,8 +230,8 @@ def plot_layer_sweep(layer_auroc: Dict[int, float], path: str, text_baselines=No
                            linewidth=0.9, label=name)
         best = max(layers, key=lambda l: (layer_auroc[l] if layer_auroc[l] == layer_auroc[l] else -1))
         ax.axvline(best, color="0.7", linewidth=0.7, linestyle=":")
-        ax.set_xlabel("Layer"); ax.set_ylabel("Held-out AUROC"); ax.set_ylim(0.4, 1.02)
-        ax.legend(ncol=1, loc="lower right")
+        ax.set_xlabel("Layer"); ax.set_ylabel("Held-out AUROC"); ax.set_ylim(0.4, 1.03)
+        ax.margins(x=0.04); ax.legend(ncol=1, loc="lower right")
         ax.set_title("Shortcut detectability by layer")
         return save(fig, path)
 

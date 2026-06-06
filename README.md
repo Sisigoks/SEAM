@@ -213,11 +213,15 @@ which residual-stream activations are extracted.
 
 | Key | Parameters | GGUF (≈Q4_K_M) | Chain of thought | Residual probe |
 |-----|-----------|----------------|------------------|----------------|
-| `qwen2.5-7b-instruct` (default) | 7B | ~4.7 GB | yes | yes (HF activations) |
-| `llama-3.1-8b-instruct` | 8B | ~4.9 GB | yes | — |
-| `mistral-7b-instruct-v0.3` | 7B | ~4.4 GB | yes | — |
-| `deepseek-r1-distill-qwen-7b` | 7B | ~4.7 GB | yes (`<think>`) | — |
+| `qwen2.5-7b-instruct` (default) | 7B | ~4.7 GB | yes | yes |
+| `llama-3.1-8b-instruct` | 8B | ~4.9 GB | yes | yes |
+| `mistral-7b-instruct-v0.3` | 7B | ~4.4 GB | yes | yes |
+| `deepseek-r1-distill-qwen-7b` | 7B | ~4.7 GB | yes (`<think>`) | yes |
 | `qwen2.5-32b-instruct` (scale ablation) | 32B | ~20 GB | yes | — |
+
+The residual probe is evaluated for every base model (each model's non-GGUF
+`hf_id` checkpoint), so the probe-vs-text-detector comparison is reported
+per-model rather than for a single model.
 
 Download the GGUF files into `models/`; the filenames match the registry
 (`python -m seam list-models`):
@@ -228,12 +232,19 @@ hf download paultimothymooney/Qwen2.5-7B-Instruct-Q4_K_M-GGUF qwen2.5-7b-instruc
 hf download bartowski/Meta-Llama-3.1-8B-Instruct-GGUF Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf --local-dir models
 hf download bartowski/Mistral-7B-Instruct-v0.3-GGUF Mistral-7B-Instruct-v0.3-Q4_K_M.gguf --local-dir models
 hf download bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF DeepSeek-R1-Distill-Qwen-7B-Q4_K_M.gguf --local-dir models
-# The residual probe additionally requires the non-GGUF checkpoint:
-hf download Qwen/Qwen2.5-7B-Instruct --local-dir models/Qwen2.5-7B-Instruct
 ```
 
 Inference uses each model's chat template, so generation stops at the model's
 end-of-sequence token; `max_tokens` is only a safety cap.
+
+The residual probe loads each model's non-GGUF `hf_id` checkpoint through
+`transformers`, which downloads it to the Hugging Face cache on first use. The
+Llama and Mistral checkpoints are gated on Hugging Face, so authenticate and
+accept their licenses before running `extract`:
+
+```bash
+huggingface-cli login        # one-time; needed for the gated Llama / Mistral checkpoints
+```
 
 ### Pipeline stages
 
@@ -305,9 +316,9 @@ wall-clock times for a single 48 GB GPU (NVIDIA L40S) are shown in parentheses.
 pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu121
 pip install -U transformers accelerate sentence-transformers scikit-learn matplotlib tqdm
 
-# (1) Additional models: the HF checkpoint for activations and the 32B scale
-#     model (~20 min download). The four GGUFs are downloaded as shown above.
-hf download Qwen/Qwen2.5-7B-Instruct --local-dir models/Qwen2.5-7B-Instruct
+# (1) The 32B scale GGUF (~15 min). The four base GGUFs are downloaded as shown
+#     above; the HF checkpoints for the probe are fetched on demand by `extract`
+#     (run `huggingface-cli login` first for the gated Llama / Mistral models).
 hf download bartowski/Qwen2.5-32B-Instruct-GGUF Qwen2.5-32B-Instruct-Q4_K_M.gguf --local-dir models
 
 # (2) Behavioural run for the four base models, with logprobs (~60-90 min).
@@ -316,12 +327,16 @@ for M in qwen2.5-7b-instruct llama-3.1-8b-instruct mistral-7b-instruct-v0.3 deep
   python -m seam grade runs/$M.jsonl --out graded/$M.jsonl
 done
 
-# (3) Extract the reference model's residual stream on the misleading condition
-#     and run the per-layer probe against the text detectors (~15 min).
-python -m seam extract graded/qwen2.5-7b-instruct.jsonl --model qwen2.5-7b-instruct \
-       --condition misleading --out acts/qwen_misleading.npz
+# (3) Extract EVERY base model's residual stream on the misleading condition and
+#     run the per-layer probe against the text detectors, uniformly (~40 min).
+for M in qwen2.5-7b-instruct llama-3.1-8b-instruct mistral-7b-instruct-v0.3 deepseek-r1-distill-qwen-7b; do
+  python -m seam extract graded/$M.jsonl --model $M --condition misleading --out acts/${M}_mis.npz
+done
 python -m seam detect "graded/*.jsonl" --out detectors.json \
-       --activations qwen2.5-7b-instruct=acts/qwen_misleading.npz
+  --activations qwen2.5-7b-instruct=acts/qwen2.5-7b-instruct_mis.npz \
+  --activations llama-3.1-8b-instruct=acts/llama-3.1-8b-instruct_mis.npz \
+  --activations mistral-7b-instruct-v0.3=acts/mistral-7b-instruct-v0.3_mis.npz \
+  --activations deepseek-r1-distill-qwen-7b=acts/deepseek-r1-distill-qwen-7b_mis.npz
 
 # (4) Behavioural metrics with confidence intervals and RCS; confidence analysis (~10 min).
 python -m seam metrics "graded/*.jsonl" --out metrics.json --rcs --bootstrap 1000
@@ -344,11 +359,12 @@ python -m seam report --metrics metrics.json --detectors detectors.json \
 ```
 
 The central comparison is in `report/fig5_layer_sweep.png` and
-`report/table3_detectors.md`: whether the residual probe attains higher grouped
-held-out AUROC than the text-based detectors, and at which layer. A probe that
-detects shortcut reliance on the correct-answer subset, where the final answer
-carries no signal, is evidence that internal representations encode shortcut use
-that the chain-of-thought text does not surface.
+`report/table3_detectors.md`, which report, for each model, whether the residual
+probe attains higher grouped held-out AUROC than the text detectors (the `probe
+gain` column) and at which layer. A probe that flags shortcut reliance on the
+correct-answer subset — where the final answer carries no signal — is evidence
+that internal representations encode shortcut use the chain-of-thought text does
+not surface.
 
 ### Metrics
 
@@ -357,6 +373,7 @@ that the chain-of-thought text does not surface.
 | Behavioural | accuracy per condition; Δhinted / Δmisleading | `metrics.accuracy_table` |
 | | Shortcut Reliance Gap, by category | `metrics.shortcut_reliance_gap`, `gap_by_category` |
 | | Answer Flip Rate; shortcut rate | `metrics.answer_flip_rate`, `metrics.shortcut_rate` |
+| | shortcut specificity (share of errors that are the trap answer); net hint effect | `metrics.shortcut_specificity`, `metrics.summarize` |
 | | bootstrap 95% CIs over base-problem IDs | `metrics.bootstrap_ci` |
 | | condition sensitivity (KL); calibration error; self-consistency | `metrics.condition_sensitivity` / `expected_calibration_error` / `self_consistency` |
 | | failure taxonomy (answer-flip, reasoning-flip, silent-shortcut, confabulation) | `metrics.failure_taxonomy` |
@@ -364,6 +381,7 @@ that the chain-of-thought text does not surface.
 | | counterfactual accuracy and flip rate | `metrics.summarize`, `counterfactual` |
 | Detectors | lexical / TF-IDF / residual probe, grouped held-out AUROC and AUPRC | `detectors.compare` |
 | | residual-probe layer sweep and best layer (localization) | `detectors.compare`, `plot_layer_sweep` |
+| | probe gain = residual AUROC − best text-detector AUROC, per model | `detectors.compare` |
 | | flagged-among-correct rate (observable right-answer/wrong-reason) | `detectors.compare` |
 | | LLM-judge detector (optional; user-supplied judge) | `detectors.llm_judge_scores` |
 | Susceptibility | flip rate by confidence tertile; point-biserial correlation | `confidence.susceptibility` |

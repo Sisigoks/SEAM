@@ -2,9 +2,10 @@
 
 The core registry holds models that fit on a single NVIDIA T4 (16 GB) at Q4_K_M,
 plus `qwen2.5-32b-instruct` for the scale ablation (needs an L40S/A100).
-Qwen2.5-7B-Instruct is the reference model: the default, and the one for which we
-support HF activation extraction (the residual probe in `activations` /
-`detectors`). The others are for behavioural comparison.
+Qwen2.5-7B-Instruct is the default. `activations=True` marks every model for which
+we run HF residual-stream extraction; the residual probe is evaluated uniformly
+across all of them (each `hf_id` is its non-GGUF checkpoint), so the
+probe-vs-text-detector comparison is per-model rather than for one model only.
 """
 from __future__ import annotations
 
@@ -26,17 +27,17 @@ MODELS = {
         repo="bartowski/Meta-Llama-3.1-8B-Instruct-GGUF",
         file="Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf",
         hf_id="meta-llama/Llama-3.1-8B-Instruct",
-        n_ctx=8192, think=False, vram_gb=4.9, activations=False),
+        n_ctx=8192, think=False, vram_gb=4.9, activations=True),
     "mistral-7b-instruct-v0.3": dict(
         repo="bartowski/Mistral-7B-Instruct-v0.3-GGUF",
         file="Mistral-7B-Instruct-v0.3-Q4_K_M.gguf",
         hf_id="mistralai/Mistral-7B-Instruct-v0.3",
-        n_ctx=8192, think=False, vram_gb=4.4, activations=False),
+        n_ctx=8192, think=False, vram_gb=4.4, activations=True),
     "deepseek-r1-distill-qwen-7b": dict(
         repo="bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF",
         file="DeepSeek-R1-Distill-Qwen-7B-Q4_K_M.gguf",
         hf_id="deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
-        n_ctx=16384, think=True, vram_gb=4.7, activations=False),
+        n_ctx=16384, think=True, vram_gb=4.7, activations=True),
     # Scale ablation: needs an L40S/A100 (does the gap hold at 32B?). Not T4.
     "qwen2.5-32b-instruct": dict(
         repo="bartowski/Qwen2.5-32B-Instruct-GGUF",

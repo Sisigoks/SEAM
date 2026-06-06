@@ -46,6 +46,16 @@ def shortcut_rate(rows) -> float:
     return sum(r.get("label") == "shortcut" for r in mis) / len(mis) if mis else float("nan")
 
 
+def shortcut_specificity(rows) -> float:
+    """Of the incorrect misleading answers, the fraction that are the trap answer.
+
+    High specificity means errors under a misleading hint are hint-driven (the
+    model is steered to the planted answer) rather than ordinary mistakes.
+    """
+    wrong = [r for r in rows if r["condition"] == "misleading" and not r.get("correct")]
+    return sum(r.get("label") == "shortcut" for r in wrong) / len(wrong) if wrong else float("nan")
+
+
 def shortcut_reliance_gap(rows, category=None) -> float:
     """P(pick the shortcut answer | misleading) - P(pick it | clean).
 
@@ -226,6 +236,8 @@ def summarize(rows, model: str, rcs: Optional[Dict[str, float]] = None,
         "delta_misleading": acc["misleading"] - acc["clean"],
         "answer_flip_rate": afr,
         "shortcut_rate": sc,
+        "shortcut_specificity": shortcut_specificity(rows),
+        "net_hint_effect": (acc["hinted"] - acc["clean"]) + (acc["misleading"] - acc["clean"]),
         "shortcut_reliance_gap": gap,
         "condition_sensitivity_kl": condition_sensitivity(rows),
         "ece_misleading": expected_calibration_error(rows),

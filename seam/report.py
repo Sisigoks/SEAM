@@ -50,14 +50,19 @@ def table_accuracy(summaries: List[dict]) -> str:
 
 
 def table_detectors(detectors: dict) -> str:
-    """Table 3 (RQ3): detector AUROC / AUPRC and flagged-among-correct rate."""
+    """Table 3 (RQ3): per-model detector AUROC, best probe layer, and probe gain
+    (residual AUROC minus the best text detector)."""
     names = sorted({d for res in detectors.values() for d in res.get("auroc", {})})
-    headers = ["model", *[f"{n} AUROC" for n in names], *[f"{n} flag%" for n in names]]
+    headers = ["model", *[f"{n.replace('_', ' ')} AUROC" for n in names],
+               "best layer", "probe gain", "RWRR (residual)"]
     rows = []
     for model, res in detectors.items():
-        cells = [model]
+        cells = [_short(model)]
         cells += [_fmt(res.get("auroc", {}).get(n)) for n in names]
-        cells += [_fmt(res.get("flagged_among_correct", {}).get(n)) for n in names]
+        bl = res.get("best_layer")
+        cells.append(str(bl) if bl is not None else "—")
+        cells.append(_fmt(res.get("probe_advantage")))
+        cells.append(_fmt(res.get("flagged_among_correct", {}).get("residual_probe")))
         rows.append(cells)
     return _md_table(headers, rows)
 
@@ -162,8 +167,10 @@ def save_figures(summaries, out_dir, detectors=None, confidence=None) -> List[st
             vals = np.array([s.get("failure_taxonomy", {}).get(ft, 0) for s in summaries], float)
             bars = ax.bar(range(len(models)), vals, bottom=bottom, label=ft.replace("_", " "))
             style_bars(bars, k); bottom += vals
+        top = float(bottom.max()) if len(bottom) and bottom.max() > 0 else 1.0
+        ax.set_ylim(0, top * 1.22); ax.margins(x=0.06)
         ax.set_xticks(range(len(models))); ax.set_xticklabels([_short(m) for m in models], rotation=25, ha="right")
-        ax.set_ylabel("count"); ax.legend(ncol=2, loc="upper center", bbox_to_anchor=(0.5, 1.28))
+        ax.set_ylabel("count"); ax.legend(ncol=2, loc="upper center", bbox_to_anchor=(0.5, 1.30))
         ax.set_title("Failure profile")
         saved.append(save(fig, os.path.join(out_dir, "fig3_failures.png")))
 
@@ -184,23 +191,33 @@ def save_figures(summaries, out_dir, detectors=None, confidence=None) -> List[st
                 style_bars(bars, 0)
                 ax.set_yticks(range(len(names))); ax.set_yticklabels([n.replace("_", " ") for n in names])
                 for i, v in enumerate(means):
-                    ax.text(min(v + 0.015, 1.0), i, f"{v:.3f}", va="center", fontsize=7)
-                ax.set_xlim(0, 1.06); ax.set_xlabel("held-out AUROC")
-                ax.set_title("Shortcut detection")
+                    ax.text(v + 0.02, i, f"{v:.3f}", va="center", fontsize=7)
+                ax.set_xlim(0, 1.16); ax.set_ylim(-0.7, len(names) - 0.3)
+                ax.set_xlabel("held-out AUROC"); ax.set_title("Shortcut detection")
                 saved.append(save(fig, os.path.join(out_dir, "fig4_detectors.png")))
 
-    # Fig 5 — residual-probe AUROC by layer (mechanistic localization).
-    layer_src = next((res for res in (detectors or {}).values() if res.get("layer_auroc")), None)
-    if layer_src:
-        from . import detectors as det
-        la = {int(k): v for k, v in layer_src["layer_auroc"].items()}
-        base = {}
-        for n in ("cot_tfidf", "cot_lexical"):
-            vals = [r["auroc"].get(n) for r in detectors.values() if r["auroc"].get(n) == r["auroc"].get(n)]
-            if vals:
-                base[n] = float(np.mean(vals))
-        saved.append(det.plot_layer_sweep(la, os.path.join(out_dir, "fig5_layer_sweep.png"),
-                                          text_baselines=base))
+    # Fig 5 — residual-probe AUROC by layer, OVERLAID for every model (uniform).
+    layer_models = {m: {int(k): v for k, v in res["layer_auroc"].items()}
+                    for m, res in (detectors or {}).items() if res.get("layer_auroc")}
+    if layer_models:
+        from .figstyle import LINESTYLES
+        with style():
+            import matplotlib.pyplot as plt
+            fig, ax = plt.subplots(figsize=(COL, 2.2))
+            for i, (m, la) in enumerate(layer_models.items()):
+                xs = sorted(la)
+                ax.plot([x / max(xs) for x in xs], [la[x] for x in xs], color="black",
+                        linestyle=LINESTYLES[i % len(LINESTYLES)], marker=MARKERS[i % len(MARKERS)],
+                        markersize=2.6, linewidth=1.0, label=_short(m))
+            txt = [r["auroc"].get("cot_tfidf") for r in detectors.values()
+                   if r["auroc"].get("cot_tfidf") == r["auroc"].get("cot_tfidf")]
+            if txt:
+                ax.axhline(float(np.mean(txt)), color="0.55", linestyle=":", linewidth=0.9,
+                           label="CoT TF-IDF")
+            ax.set_xlabel("relative depth (layer / final)"); ax.set_ylabel("held-out AUROC")
+            ax.set_ylim(0.45, 1.03); ax.margins(x=0.04); ax.legend(ncol=1, loc="lower right")
+            ax.set_title("Shortcut detectability by layer")
+            saved.append(save(fig, os.path.join(out_dir, "fig5_layer_sweep.png")))
 
     # Fig 6 — susceptibility vs. confidence (the confidence analysis).
     if confidence:
@@ -222,7 +239,8 @@ def save_figures(summaries, out_dir, detectors=None, confidence=None) -> List[st
             fig, ax = plt.subplots(figsize=(COL, 0.32 * len(items) + 0.9))
             bars = ax.barh([b.replace("_", " ") for b, _ in items], [v for _, v in items])
             style_bars(bars, 1)
-            ax.set_xlabel("mean shortcut rate"); ax.set_xlim(0, 1.0)
+            ax.set_xlabel("mean shortcut rate"); ax.set_xlim(0, 1.05)
+            ax.set_ylim(-0.7, len(items) - 0.3)
             ax.set_title("Most-effective reasoning traps")
             saved.append(save(fig, os.path.join(out_dir, "fig7_bias.png")))
 
@@ -239,7 +257,7 @@ def save_figures(summaries, out_dir, detectors=None, confidence=None) -> List[st
                         textcoords="offset points")
         ax.set_xlabel("behavioural SEAM"); ax.set_ylabel("mechanistic SEAM")
         ax.axhline(.5, ls=":", color="0.6", lw=0.7); ax.axvline(.5, ls=":", color="0.6", lw=0.7)
-        ax.set_xlim(0, 1); ax.set_ylim(0, 1); ax.set_title("SEAM ranking")
+        ax.set_xlim(-0.05, 1.05); ax.set_ylim(-0.05, 1.05); ax.set_title("SEAM ranking")
         saved.append(save(fig, os.path.join(out_dir, "fig8_seam_scatter.png")))
 
     return [p for p in saved if p]
