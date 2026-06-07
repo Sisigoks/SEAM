@@ -1,0 +1,114 @@
+{
+  "deepseek-r1-distill-qwen-7b": {
+    "n": 145,
+    "buckets": [
+      {
+        "bucket": "low",
+        "n": 48,
+        "conf_mean": 0.7955410173661406,
+        "flip_rate": 0.25,
+        "shortcut_rate": 0.20833333333333334
+      },
+      {
+        "bucket": "medium",
+        "n": 48,
+        "conf_mean": 1.0,
+        "flip_rate": 0.22916666666666666,
+        "shortcut_rate": 0.10416666666666667
+      },
+      {
+        "bucket": "high",
+        "n": 49,
+        "conf_mean": 1.0,
+        "flip_rate": 0.22448979591836735,
+        "shortcut_rate": 0.14285714285714285
+      }
+    ],
+    "proxy": "auto",
+    "point_biserial": -0.07964494670650966
+  },
+  "llama-3.1-8b-instruct": {
+    "n": 150,
+    "buckets": [
+      {
+        "bucket": "low",
+        "n": 50,
+        "conf_mean": 0.9713845728653347,
+        "flip_rate": 0.5,
+        "shortcut_rate": 0.4
+      },
+      {
+        "bucket": "medium",
+        "n": 50,
+        "conf_mean": 1.0,
+        "flip_rate": 0.68,
+        "shortcut_rate": 0.38
+      },
+      {
+        "bucket": "high",
+        "n": 50,
+        "conf_mean": 1.0,
+        "flip_rate": 0.48,
+        "shortcut_rate": 0.26
+      }
+    ],
+    "proxy": "auto",
+    "point_biserial": 0.09800452737371179
+  },
+  "mistral-7b-instruct-v0.3": {
+    "n": 88,
+    "buckets": [
+      {
+        "bucket": "low",
+        "n": 29,
+        "conf_mean": 0.9767934182184012,
+        "flip_rate": 0.6896551724137931,
+        "shortcut_rate": 0.6551724137931034
+      },
+      {
+        "bucket": "medium",
+        "n": 29,
+        "conf_mean": 1.0,
+        "flip_rate": 0.7241379310344828,
+        "shortcut_rate": 0.6896551724137931
+      },
+      {
+        "bucket": "high",
+        "n": 30,
+        "conf_mean": 1.0,
+        "flip_rate": 0.5666666666666667,
+        "shortcut_rate": 0.43333333333333335
+      }
+    ],
+    "proxy": "auto",
+    "point_biserial": -0.09348964316900266
+  },
+  "qwen2.5-7b-instruct": {
+    "n": 168,
+    "buckets": [
+      {
+        "bucket": "low",
+        "n": 56,
+        "conf_mean": 0.952469125895111,
+        "flip_rate": 0.21428571428571427,
+        "shortcut_rate": 0.17857142857142858
+      },
+      {
+        "bucket": "medium",
+        "n": 56,
+        "conf_mean": 1.0,
+        "flip_rate": 0.25,
+        "shortcut_rate": 0.21428571428571427
+      },
+      {
+        "bucket": "high",
+        "n": 56,
+        "conf_mean": 1.0,
+        "flip_rate": 0.14285714285714285,
+        "shortcut_rate": 0.125
+      }
+    ],
+    "proxy": "auto",
+    "point_biserial": -0.002299572137788089
+  }
+}

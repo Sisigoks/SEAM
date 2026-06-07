@@ -57,10 +57,20 @@ def extract_activations(rows: List[dict], hf_id: str, layers: Optional[List[int]
     feats, ids = [], []
     with torch.no_grad():
         for r in track(rows, desc=f"acts:{hf_id.split('/')[-1]}"):
-            input_ids = tok.apply_chat_template(
-                build_messages(r["raw_prompt"]), add_generation_prompt=True,
-                return_tensors="pt").to(model.device)
-            hs = model(input_ids).hidden_states          # tuple len L+1, each (1,seq,H)
+            
+            inputs = tok.apply_chat_template(
+                build_messages(r["raw_prompt"]),
+                add_generation_prompt=True,
+                return_tensors="pt"
+            ).to(model.device)
+            
+            outputs = model(
+                **inputs,
+                output_hidden_states=True,
+                return_dict=True
+            )
+            
+            hs = outputs.hidden_states         # tuple len L+1, each (1,seq,H)
             vec = torch.stack([h[0, -1, :] for h in hs], 0)   # (L+1, H) last token
             feats.append(vec.float().cpu().numpy())
             ids.append(r["id"])

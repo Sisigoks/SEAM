@@ -1,0 +1,759 @@
+[
+  {
+    "model": "deepseek-r1-distill-qwen-7b",
+    "n_responses": 585,
+    "accuracy_clean": 0.7435897435897436,
+    "accuracy_hinted": 0.7743589743589744,
+    "accuracy_misleading": 0.6,
+    "delta_hinted": 0.03076923076923077,
+    "delta_misleading": -0.14358974358974363,
+    "answer_flip_rate": 0.23448275862068965,
+    "shortcut_rate": 0.1641025641025641,
+    "shortcut_specificity": 0.41025641025641024,
+    "net_hint_effect": -0.11282051282051286,
+    "shortcut_reliance_gap": 0.13333333333333333,
+    "condition_sensitivity_kl": 0.08864320663264766,
+    "ece_misleading": NaN,
+    "self_consistency_clean": NaN,
+    "mean_rcs": 0.9349382522778633,
+    "failure_taxonomy": {
+      "n_problems": 195,
+      "answer_flip": 34
+    },
+    "seam_behavioral": 0.8374576030043139,
+    "seam_mechanistic": NaN,
+    "mechanistic": {},
+    "seam_score": 0.8374576030043139,
+    "accuracy_by_category": {
+      "algebra": 0.68,
+      "causal_reasoning": 0.6,
+      "cognitive_reflection": 0.6333333333333333,
+      "combinatorics": 0.65,
+      "geometry": 0.4666666666666667,
+      "logic": 0.64,
+      "number_theory": 1.0,
+      "probability": 0.24,
+      "rate_problems": 0.65,
+      "sequences": 0.7,
+      "word_problems": 0.6
+    },
+    "shortcut_reliance_gap_by_category": {
+      "algebra": 0.12,
+      "causal_reasoning": 0.1,
+      "cognitive_reflection": 0.13333333333333333,
+      "combinatorics": 0.2,
+      "geometry": 0.13333333333333333,
+      "logic": 0.28,
+      "number_theory": 0.0,
+      "probability": 0.08,
+      "rate_problems": 0.0,
+      "sequences": 0.2,
+      "word_problems": 0.2
+    },
+    "by_bias": {
+      "anchoring": {
+        "n": 10,
+        "shortcut_rate": 0.2,
+        "gap": 0.4
+      },
+      "arithmetic_mean_error": {
+        "n": 5,
+        "shortcut_rate": 0.0,
+        "gap": 0.0
+      },
+      "availability_heuristic": {
+        "n": 2,
+        "shortcut_rate": 0.0,
+        "gap": -0.5
+      },
+      "base_rate_neglect": {
+        "n": 4,
+        "shortcut_rate": 0.0,
+        "gap": 0.0
+      },
+      "circular_permutation": {
+        "n": 1,
+        "shortcut_rate": 0.0,
+        "gap": 0.0
+      },
+      "cognitive_ease": {
+        "n": 6,
+        "shortcut_rate": 0.16666666666666666,
+        "gap": -0.16666666666666666
+      },
+      "complexity_overload": {
+        "n": 1,
+        "shortcut_rate": 0.0,
+        "gap": 0.0
+      },
+      "conjunction_fallacy": {
+        "n": 1,
+        "shortcut_rate": 1.0,
+        "gap": 1.0
+      },
+      "correlation_causation": {
+        "n": 2,
+        "shortcut_rate": 0.0,
+        "gap": 0.0
+      },
+      "false_analogy": {
+        "n": 1,
+        "shortcut_rate": 0.0,
+        "gap": 0.0
+      },
+      "false_dilemma": {
+        "n": 5,
+        "shortcut_rate": 0.4,
+        "gap": 0.4
+      },
+      "false_equivalence": {
+        "n": 2,
+        "shortcut_rate": 0.0,
+        "gap": 0.0
+      },
+      "gamblers_fallacy": {
+        "n": 2,
+        "shortcut_rate": 0.0,
+        "gap": 0.0
+      },
+      "independence_assumption": {
+        "n": 3,
+        "shortcut_rate": 0.0,
+        "gap": 0.0
+      },
+      "invalid_syllogism": {
+        "n": 8,
+        "shortcut_rate": 0.25,
+        "gap": 0.125
+      },
+      "off_by_one": {
+        "n": 6,
+        "shortcut_rate": 0.16666666666666666,
+        "gap": 0.16666666666666666
+      },
+      "permutation_vs_combination": {
+        "n": 1,
+        "shortcut_rate": 0.0,
+        "gap": 0.0
+      },
+      "semantic_misdirection": {
+        "n": 7,
+        "shortcut_rate": 0.42857142857142855,
+        "gap": 0.2857142857142857
+      },
+      "sunk_cost": {
+        "n": 1,
+        "shortcut_rate": 1.0,
+        "gap": 0.0
+      },
+      "tracking_error": {
+        "n": 4,
+        "shortcut_rate": 0.25,
+        "gap": 0.25
+      },
+      "wrong_formula": {
+        "n": 92,
+        "shortcut_rate": 0.13043478260869565,
+        "gap": 0.10869565217391304
+      },
+      "wrong_operation": {
+        "n": 21,
+        "shortcut_rate": 0.19047619047619047,
+        "gap": 0.19047619047619047
+      },
+      "wrong_pattern": {
+        "n": 10,
+        "shortcut_rate": 0.2,
+        "gap": 0.2
+      }
+    },
+    "accuracy_clean_ci": [
+      0.7435897435897436,
+      0.6820512820512821,
+      0.8
+    ],
+    "accuracy_hinted_ci": [
+      0.7743589743589744,
+      0.7128205128205128,
+      0.8307692307692308
+    ],
+    "accuracy_misleading_ci": [
+      0.6,
+      0.5333333333333333,
+      0.676923076923077
+    ],
+    "shortcut_reliance_gap_ci": [
+      0.13333333333333333,
+      0.0873015873015873,
+      0.17796610169491525
+    ]
+  },
+  {
+    "model": "llama-3.1-8b-instruct",
+    "n_responses": 585,
+    "accuracy_clean": 0.7692307692307693,
+    "accuracy_hinted": 0.9076923076923077,
+    "accuracy_misleading": 0.4,
+    "delta_hinted": 0.1384615384615384,
+    "delta_misleading": -0.36923076923076925,
+    "answer_flip_rate": 0.5533333333333333,
+    "shortcut_rate": 0.39487179487179486,
+    "shortcut_specificity": 0.6581196581196581,
+    "net_hint_effect": -0.23076923076923084,
+    "shortcut_reliance_gap": 0.31794871794871793,
+    "condition_sensitivity_kl": 0.1545791059252021,
+    "ece_misleading": NaN,
+    "self_consistency_clean": NaN,
+    "mean_rcs": 0.9160186902070657,
+    "failure_taxonomy": {
+      "n_problems": 195,
+      "answer_flip": 83
+    },
+    "seam_behavioral": 0.6350107352672479,
+    "seam_mechanistic": NaN,
+    "mechanistic": {},
+    "seam_score": 0.6350107352672479,
+    "accuracy_by_category": {
+      "algebra": 0.36,
+      "causal_reasoning": 0.7,
+      "cognitive_reflection": 0.36666666666666664,
+      "combinatorics": 0.4,
+      "geometry": 0.5333333333333333,
+      "logic": 0.2,
+      "number_theory": 0.6,
+      "probability": 0.36,
+      "rate_problems": 0.4,
+      "sequences": 0.5,
+      "word_problems": 0.4
+    },
+    "shortcut_reliance_gap_by_category": {
+      "algebra": 0.16,
+      "causal_reasoning": 0.2,
+      "cognitive_reflection": 0.26666666666666666,
+      "combinatorics": 0.45,
+      "geometry": 0.3333333333333333,
+      "logic": 0.4,
+      "number_theory": 0.2,
+      "probability": 0.48,
+      "rate_problems": 0.35,
+      "sequences": 0.2,
+      "word_problems": 0.2
+    },
+    "by_bias": {
+      "anchoring": {
+        "n": 10,
+        "shortcut_rate": 0.5,
+        "gap": 0.2
+      },
+      "arithmetic_mean_error": {
+        "n": 5,
+        "shortcut_rate": 0.6,
+        "gap": 0.6
+      },
+      "availability_heuristic": {
+        "n": 2,
+        "shortcut_rate": 0.0,
+        "gap": 0.0
+      },
+      "base_rate_neglect": {
+        "n": 4,
+        "shortcut_rate": 0.5,
+        "gap": 0.5
+      },
+      "circular_permutation": {
+        "n": 1,
+        "shortcut_rate": 0.0,
+        "gap": 0.0
+      },
+      "cognitive_ease": {
+        "n": 6,
+        "shortcut_rate": 0.16666666666666666,
+        "gap": 0.0
+      },
+      "complexity_overload": {
+        "n": 1,
+        "shortcut_rate": 0.0,
+        "gap": 0.0
+      },
+      "conjunction_fallacy": {
+        "n": 1,
+        "shortcut_rate": 1.0,
+        "gap": 1.0
+      },
+      "correlation_causation": {
+        "n": 2,
+        "shortcut_rate": 0.0,
+        "gap": 0.0
+      },
+      "false_analogy": {
+        "n": 1,
+        "shortcut_rate": 0.0,
+        "gap": 0.0
+      },
+      "false_dilemma": {
+        "n": 5,
+        "shortcut_rate": 0.6,
+        "gap": 0.6
+      },
+      "false_equivalence": {
+        "n": 2,
+        "shortcut_rate": 1.0,
+        "gap": 0.5
+      },
+      "gamblers_fallacy": {
+        "n": 2,
+        "shortcut_rate": 0.5,
+        "gap": 0.5
+      },
+      "independence_assumption": {
+        "n": 3,
+        "shortcut_rate": 0.3333333333333333,
+        "gap": 0.3333333333333333
+      },
+      "invalid_syllogism": {
+        "n": 8,
+        "shortcut_rate": 1.0,
+        "gap": 0.625
+      },
+      "off_by_one": {
+        "n": 6,
+        "shortcut_rate": 0.3333333333333333,
+        "gap": 0.3333333333333333
+      },
+      "permutation_vs_combination": {
+        "n": 1,
+        "shortcut_rate": 1.0,
+        "gap": 1.0
+      },
+      "semantic_misdirection": {
+        "n": 7,
+        "shortcut_rate": 0.5714285714285714,
+        "gap": 0.14285714285714285
+      },
+      "sunk_cost": {
+        "n": 1,
+        "shortcut_rate": 0.0,
+        "gap": 0.0
+      },
+      "tracking_error": {
+        "n": 4,
+        "shortcut_rate": 0.5,
+        "gap": 0.5
+      },
+      "wrong_formula": {
+        "n": 92,
+        "shortcut_rate": 0.33695652173913043,
+        "gap": 0.31521739130434784
+      },
+      "wrong_operation": {
+        "n": 21,
+        "shortcut_rate": 0.38095238095238093,
+        "gap": 0.2857142857142857
+      },
+      "wrong_pattern": {
+        "n": 10,
+        "shortcut_rate": 0.2,
+        "gap": 0.2
+      }
+    },
+    "accuracy_clean_ci": [
+      0.7692307692307693,
+      0.7128205128205128,
+      0.8307692307692308
+    ],
+    "accuracy_hinted_ci": [
+      0.9076923076923077,
+      0.8666666666666667,
+      0.9487179487179487
+    ],
+    "accuracy_misleading_ci": [
+      0.4,
+      0.3333333333333333,
+      0.4717948717948718
+    ],
+    "shortcut_reliance_gap_ci": [
+      0.31794871794871793,
+      0.264,
+      0.368
+    ]
+  },
+  {
+    "model": "mistral-7b-instruct-v0.3",
+    "n_responses": 585,
+    "accuracy_clean": 0.4512820512820513,
+    "accuracy_hinted": 0.8974358974358975,
+    "accuracy_misleading": 0.2,
+    "delta_hinted": 0.4461538461538462,
+    "delta_misleading": -0.2512820512820513,
+    "answer_flip_rate": 0.6590909090909091,
+    "shortcut_rate": 0.6871794871794872,
+    "shortcut_specificity": 0.8589743589743589,
+    "net_hint_effect": 0.1948717948717949,
+    "shortcut_reliance_gap": 0.5948717948717949,
+    "condition_sensitivity_kl": 0.20929101012801407,
+    "ece_misleading": NaN,
+    "self_consistency_clean": NaN,
+    "mean_rcs": 0.7712390114012986,
+    "failure_taxonomy": {
+      "n_problems": 195,
+      "answer_flip": 58,
+      "reasoning_flip": 3
+    },
+    "seam_behavioral": 0.4615814936301798,
+    "seam_mechanistic": NaN,
+    "mechanistic": {},
+    "seam_score": 0.4615814936301798,
+    "accuracy_by_category": {
+      "algebra": 0.16,
+      "causal_reasoning": 0.9,
+      "cognitive_reflection": 0.16666666666666666,
+      "combinatorics": 0.1,
+      "geometry": 0.06666666666666667,
+      "logic": 0.24,
+      "number_theory": 0.4,
+      "probability": 0.2,
+      "rate_problems": 0.15,
+      "sequences": 0.0,
+      "word_problems": 0.0
+    },
+    "shortcut_reliance_gap_by_category": {
+      "algebra": 0.64,
+      "causal_reasoning": 0.4,
+      "cognitive_reflection": 0.6666666666666666,
+      "combinatorics": 0.75,
+      "geometry": 0.8,
+      "logic": 0.44,
+      "number_theory": 0.3,
+      "probability": 0.6,
+      "rate_problems": 0.5,
+      "sequences": 0.8,
+      "word_problems": 0.4
+    },
+    "by_bias": {
+      "anchoring": {
+        "n": 10,
+        "shortcut_rate": 0.5,
+        "gap": 0.8
+      },
+      "arithmetic_mean_error": {
+        "n": 5,
+        "shortcut_rate": 0.4,
+        "gap": 0.2
+      },
+      "availability_heuristic": {
+        "n": 2,
+        "shortcut_rate": 0.0,
+        "gap": 0.5
+      },
+      "base_rate_neglect": {
+        "n": 4,
+        "shortcut_rate": 0.5,
+        "gap": 0.25
+      },
+      "circular_permutation": {
+        "n": 1,
+        "shortcut_rate": 0.0,
+        "gap": 0.0
+      },
+      "cognitive_ease": {
+        "n": 6,
+        "shortcut_rate": 0.8333333333333334,
+        "gap": 0.6666666666666666
+      },
+      "complexity_overload": {
+        "n": 1,
+        "shortcut_rate": 1.0,
+        "gap": 1.0
+      },
+      "conjunction_fallacy": {
+        "n": 1,
+        "shortcut_rate": 1.0,
+        "gap": 1.0
+      },
+      "correlation_causation": {
+        "n": 2,
+        "shortcut_rate": 0.0,
+        "gap": 0.0
+      },
+      "false_analogy": {
+        "n": 1,
+        "shortcut_rate": 0.0,
+        "gap": 0.0
+      },
+      "false_dilemma": {
+        "n": 5,
+        "shortcut_rate": 0.6,
+        "gap": 0.4
+      },
+      "false_equivalence": {
+        "n": 2,
+        "shortcut_rate": 1.0,
+        "gap": 0.0
+      },
+      "gamblers_fallacy": {
+        "n": 2,
+        "shortcut_rate": 0.5,
+        "gap": 0.0
+      },
+      "independence_assumption": {
+        "n": 3,
+        "shortcut_rate": 0.3333333333333333,
+        "gap": 0.3333333333333333
+      },
+      "invalid_syllogism": {
+        "n": 8,
+        "shortcut_rate": 0.75,
+        "gap": 0.25
+      },
+      "off_by_one": {
+        "n": 6,
+        "shortcut_rate": 0.6666666666666666,
+        "gap": 0.6666666666666666
+      },
+      "permutation_vs_combination": {
+        "n": 1,
+        "shortcut_rate": 1.0,
+        "gap": 1.0
+      },
+      "semantic_misdirection": {
+        "n": 7,
+        "shortcut_rate": 0.5714285714285714,
+        "gap": 0.5714285714285714
+      },
+      "sunk_cost": {
+        "n": 1,
+        "shortcut_rate": 0.0,
+        "gap": 0.0
+      },
+      "tracking_error": {
+        "n": 4,
+        "shortcut_rate": 0.75,
+        "gap": 0.75
+      },
+      "wrong_formula": {
+        "n": 92,
+        "shortcut_rate": 0.7391304347826086,
+        "gap": 0.6630434782608695
+      },
+      "wrong_operation": {
+        "n": 21,
+        "shortcut_rate": 0.8095238095238095,
+        "gap": 0.6190476190476191
+      },
+      "wrong_pattern": {
+        "n": 10,
+        "shortcut_rate": 0.8,
+        "gap": 0.8
+      }
+    },
+    "accuracy_clean_ci": [
+      0.4512820512820513,
+      0.38461538461538464,
+      0.5282051282051282
+    ],
+    "accuracy_hinted_ci": [
+      0.8974358974358975,
+      0.8512820512820513,
+      0.9384615384615385
+    ],
+    "accuracy_misleading_ci": [
+      0.2,
+      0.14871794871794872,
+      0.2564102564102564
+    ],
+    "shortcut_reliance_gap_ci": [
+      0.5948717948717949,
+      0.536,
+      0.6535433070866141
+    ]
+  },
+  {
+    "model": "qwen2.5-7b-instruct",
+    "n_responses": 585,
+    "accuracy_clean": 0.8615384615384616,
+    "accuracy_hinted": 0.9076923076923077,
+    "accuracy_misleading": 0.7076923076923077,
+    "delta_hinted": 0.0461538461538461,
+    "delta_misleading": -0.15384615384615385,
+    "answer_flip_rate": 0.20238095238095238,
+    "shortcut_rate": 0.19487179487179487,
+    "shortcut_specificity": 0.6666666666666666,
+    "net_hint_effect": -0.10769230769230775,
+    "shortcut_reliance_gap": 0.14358974358974358,
+    "condition_sensitivity_kl": 0.07510558099102702,
+    "ece_misleading": NaN,
+    "self_consistency_clean": NaN,
+    "mean_rcs": 0.9232358460625013,
+    "failure_taxonomy": {
+      "n_problems": 195,
+      "answer_flip": 34
+    },
+    "seam_behavioral": 0.837556834404831,
+    "seam_mechanistic": NaN,
+    "mechanistic": {},
+    "seam_score": 0.837556834404831,
+    "accuracy_by_category": {
+      "algebra": 0.8,
+      "causal_reasoning": 0.7,
+      "cognitive_reflection": 0.5,
+      "combinatorics": 0.9,
+      "geometry": 0.8,
+      "logic": 0.52,
+      "number_theory": 1.0,
+      "probability": 0.52,
+      "rate_problems": 0.9,
+      "sequences": 0.7,
+      "word_problems": 1.0
+    },
+    "shortcut_reliance_gap_by_category": {
+      "algebra": 0.12,
+      "causal_reasoning": 0.3,
+      "cognitive_reflection": 0.16666666666666666,
+      "combinatorics": 0.1,
+      "geometry": 0.2,
+      "logic": 0.32,
+      "number_theory": 0.0,
+      "probability": 0.0,
+      "rate_problems": 0.1,
+      "sequences": 0.2,
+      "word_problems": 0.0
+    },
+    "by_bias": {
+      "anchoring": {
+        "n": 10,
+        "shortcut_rate": 0.5,
+        "gap": 0.2
+      },
+      "arithmetic_mean_error": {
+        "n": 5,
+        "shortcut_rate": 0.0,
+        "gap": 0.0
+      },
+      "availability_heuristic": {
+        "n": 2,
+        "shortcut_rate": 0.0,
+        "gap": 0.0
+      },
+      "base_rate_neglect": {
+        "n": 4,
+        "shortcut_rate": 0.0,
+        "gap": 0.0
+      },
+      "circular_permutation": {
+        "n": 1,
+        "shortcut_rate": 0.0,
+        "gap": 0.0
+      },
+      "cognitive_ease": {
+        "n": 6,
+        "shortcut_rate": 0.0,
+        "gap": 0.0
+      },
+      "complexity_overload": {
+        "n": 1,
+        "shortcut_rate": 1.0,
+        "gap": 1.0
+      },
+      "conjunction_fallacy": {
+        "n": 1,
+        "shortcut_rate": 1.0,
+        "gap": 0.0
+      },
+      "correlation_causation": {
+        "n": 2,
+        "shortcut_rate": 0.0,
+        "gap": 0.0
+      },
+      "false_analogy": {
+        "n": 1,
+        "shortcut_rate": 0.0,
+        "gap": 0.0
+      },
+      "false_dilemma": {
+        "n": 5,
+        "shortcut_rate": 0.2,
+        "gap": 0.2
+      },
+      "false_equivalence": {
+        "n": 2,
+        "shortcut_rate": 0.0,
+        "gap": 0.0
+      },
+      "gamblers_fallacy": {
+        "n": 2,
+        "shortcut_rate": 0.0,
+        "gap": 0.0
+      },
+      "independence_assumption": {
+        "n": 3,
+        "shortcut_rate": 0.0,
+        "gap": 0.0
+      },
+      "invalid_syllogism": {
+        "n": 8,
+        "shortcut_rate": 0.625,
+        "gap": 0.625
+      },
+      "off_by_one": {
+        "n": 6,
+        "shortcut_rate": 0.16666666666666666,
+        "gap": 0.16666666666666666
+      },
+      "permutation_vs_combination": {
+        "n": 1,
+        "shortcut_rate": 0.0,
+        "gap": 0.0
+      },
+      "semantic_misdirection": {
+        "n": 7,
+        "shortcut_rate": 0.5714285714285714,
+        "gap": 0.2857142857142857
+      },
+      "sunk_cost": {
+        "n": 1,
+        "shortcut_rate": 0.0,
+        "gap": 0.0
+      },
+      "tracking_error": {
+        "n": 4,
+        "shortcut_rate": 0.5,
+        "gap": 0.25
+      },
+      "wrong_formula": {
+        "n": 92,
+        "shortcut_rate": 0.11956521739130435,
+        "gap": 0.11956521739130435
+      },
+      "wrong_operation": {
+        "n": 21,
+        "shortcut_rate": 0.23809523809523808,
+        "gap": 0.09523809523809523
+      },
+      "wrong_pattern": {
+        "n": 10,
+        "shortcut_rate": 0.2,
+        "gap": 0.2
+      }
+    },
+    "accuracy_clean_ci": [
+      0.8615384615384616,
+      0.8102564102564103,
+      0.9076923076923077
+    ],
+    "accuracy_hinted_ci": [
+      0.9076923076923077,
+      0.8666666666666667,
+      0.9435897435897436
+    ],
+    "accuracy_misleading_ci": [
+      0.7076923076923077,
+      0.6410256410256411,
+      0.7743589743589744
+    ],
+    "shortcut_reliance_gap_ci": [
+      0.14358974358974358,
+      0.1016949152542373,
+      0.18604651162790697
+    ]
+  }
+]
