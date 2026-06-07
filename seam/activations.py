@@ -18,18 +18,19 @@ from .config import build_messages
 from .progress import track
 
 
-def extract_activations(rows: List[dict], hf_id: str, layers: Optional[List[int]] = None,
-                        dtype: str = "float16", load_4bit: bool = False,
-                        device: Optional[str] = None):
-    """Return (X, ids, layer_indices) where X is (n_rows, n_layers, hidden)."""
-    import numpy as np
+def load_hf(hf_id: str, dtype: str = "float16", load_4bit: bool = False,
+            device: Optional[str] = None, output_hidden_states: bool = False):
+    """Load an HF causal-LM checkpoint and tokenizer. Shared by `extract` and the
+    `run --backend hf` path so behaviour and activations come from one model."""
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
     tok = AutoTokenizer.from_pretrained(hf_id)
+    if tok.pad_token_id is None:
+        tok.pad_token = tok.eos_token
 
-    load_kw = dict(output_hidden_states=True)
+    load_kw = dict(output_hidden_states=output_hidden_states)
     if load_4bit:
         from transformers import BitsAndBytesConfig
         load_kw["quantization_config"] = BitsAndBytesConfig(
@@ -39,6 +40,17 @@ def extract_activations(rows: List[dict], hf_id: str, layers: Optional[List[int]
         load_kw["torch_dtype"] = getattr(torch, dtype)
         load_kw["device_map"] = device
     model = AutoModelForCausalLM.from_pretrained(hf_id, **load_kw).eval()
+    return model, tok, device
+
+
+def extract_activations(rows: List[dict], hf_id: str, layers: Optional[List[int]] = None,
+                        dtype: str = "float16", load_4bit: bool = False,
+                        device: Optional[str] = None):
+    """Return (X, ids, layer_indices) where X is (n_rows, n_layers, hidden)."""
+    import numpy as np
+    import torch
+
+    model, tok, device = load_hf(hf_id, dtype, load_4bit, device, output_hidden_states=True)
     print(f"Loaded {hf_id} on {device} (4bit={load_4bit}); extracting "
           f"residual stream for {len(rows)} rows...", flush=True)
 

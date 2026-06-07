@@ -102,6 +102,36 @@ def generate(llm, messages, gen: dict, want_logprobs: bool = False) -> dict:
     return {"text": text, "confidence": _chat_confidence(choice)}
 
 
+def _hf_generate(model, tok, messages, gen: dict, want_logprobs: bool = False) -> dict:
+    """One chat completion via HF transformers (same model used for activations)."""
+    import torch
+    input_ids = tok.apply_chat_template(messages, add_generation_prompt=True,
+                                        return_tensors="pt").to(model.device)
+    do_sample = gen.get("temperature", 0.0) > 0
+    if do_sample:
+        torch.manual_seed(gen.get("seed", 0))           # reproducible self-consistency
+    kw = dict(max_new_tokens=gen.get("max_tokens", 1024), do_sample=do_sample,
+              pad_token_id=tok.eos_token_id, return_dict_in_generate=True,
+              output_scores=want_logprobs)
+    if do_sample:
+        kw.update(temperature=gen["temperature"], top_p=gen.get("top_p", 0.95))
+    with torch.no_grad():
+        out = model.generate(input_ids, **kw)
+    seq = out.sequences[0, input_ids.shape[1]:]
+    text = tok.decode(seq, skip_special_tokens=True)
+    conf = None
+    if want_logprobs and getattr(out, "scores", None):
+        import torch.nn.functional as F
+        lps = []
+        for i, score in enumerate(out.scores):
+            if i >= len(seq):
+                break
+            lps.append(F.log_softmax(score[0].float(), dim=-1)[seq[i]].item())
+        if lps:
+            conf = float(torch.exp(torch.tensor(sum(lps) / len(lps))))
+    return {"text": text, "confidence": conf}
+
+
 def _consistency_confidence(answers: List[str]) -> Optional[float]:
     if not answers:
         return None
@@ -110,29 +140,45 @@ def _consistency_confidence(answers: List[str]) -> Optional[float]:
 
 
 def run(dataset, model_key: str, out_path: str, *,
-        items=None, gguf_path=None, models_dir=None, samples=1, want_logprobs=False,
+        items=None, backend="llamacpp", dtype="float16", load_4bit=False,
+        gguf_path=None, models_dir=None, samples=1, want_logprobs=False,
         n_gpu_layers=-1, limit=None, categories=None, progress=True) -> str:
     """Run one model and write a responses JSONL.
 
-    By default iterates the dataset (clean/hinted/misleading). Pass `items` (e.g.
-    counterfactual work-items, each with `raw_prompt`) to run a custom prompt set.
-    Confidence comes from token logprobs (`want_logprobs`); otherwise, with
-    `samples>1`, it falls back to the self-consistency agreement rate.
+    backend="llamacpp" uses a quantized GGUF via llama.cpp (fast). backend="hf"
+    uses the model's `hf_id` checkpoint via transformers — the same model the
+    residual probe extracts activations from — so behaviour and activations are
+    produced by one model rather than a quantized/full-precision pair.
+
+    By default iterates the dataset (clean/hinted/misleading); pass `items` (e.g.
+    counterfactual work-items) to run a custom prompt set. Confidence comes from
+    token logprobs (`want_logprobs`); otherwise, with `samples>1`, it falls back
+    to the self-consistency agreement rate.
     """
-    llm = load_llm(model_key, gguf_path=gguf_path, models_dir=models_dir,
-                   logits_all=want_logprobs, n_gpu_layers=n_gpu_layers)
+    if backend == "hf":
+        from . import activations as act
+        hf_id = MODELS.get(model_key, {}).get("hf_id") or model_key
+        model, tok, dev = act.load_hf(hf_id, dtype=dtype, load_4bit=load_4bit)
+        print(f"Loaded {hf_id} via transformers on {dev} (4bit={load_4bit}).", flush=True)
+        gen_fn = lambda msgs, g: _hf_generate(model, tok, msgs, g, want_logprobs)
+        desc = f"HF:{hf_id.split('/')[-1]}"
+    else:
+        llm = load_llm(model_key, gguf_path=gguf_path, models_dir=models_dir,
+                       logits_all=want_logprobs, n_gpu_layers=n_gpu_layers)
+        gen_fn = lambda msgs, g: generate(llm, msgs, g, want_logprobs=want_logprobs)
+        desc = "llama.cpp"
 
     rows = []
     if items is None:
         items = list(data.iter_items(dataset, categories=categories, limit=limit))
-    print(f"Running {model_key} over {len(items)} prompts...", flush=True)
+    print(f"Running {model_key} [{desc}] over {len(items)} prompts...", flush=True)
     iterator = track(items, desc=f"run:{model_key}") if progress else items
     for item in iterator:
         messages = build_messages(item["raw_prompt"])
         gens = []
         for s in range(max(1, samples)):
             g = dict(GEN) if s == 0 else dict(GEN, temperature=SAMPLE_TEMPERATURE, seed=s)
-            gens.append(generate(llm, messages, g, want_logprobs=want_logprobs))
+            gens.append(gen_fn(messages, g))
 
         cot, final = split_response(gens[0]["text"])
         sample_answers = [split_response(g["text"])[1] for g in gens]

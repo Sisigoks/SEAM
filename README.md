@@ -283,82 +283,80 @@ python -m seam finetune "graded/*.jsonl" --base-model sentence-transformers/all-
 
 On PowerShell or cmd, quote globs (`"graded/*.jsonl"`); the CLI expands them.
 
+### Backends and the residual probe
+
+Each model has both a quantized GGUF (`repo`, for fast llama.cpp generation) and
+its full-precision checkpoint (`hf_id`, for activation extraction). Two options
+keep the probe sound:
+
+- `--backend llamacpp` (default) generates behaviour from the GGUF and extracts
+  activations from the `hf_id` checkpoint. This is fast, but behaviour and
+  activations come from different precisions.
+- `--backend hf` generates behaviour from the same `hf_id` checkpoint the probe
+  uses, so behaviour and activations come from one model. Use this for the
+  reported probe results.
+
+`pipeline --probe` interrogates the internal representations of **every** model
+marked `activations=True`: it extracts the residual stream on the misleading
+condition (for the per-layer probe and the probe-vs-text comparison) and on the
+clean condition (for clean-vs-misleading separability), and folds probe
+layer-localization and separability into the mechanistic SEAM sub-score. So both
+the behavioural and the internal aspects are computed uniformly across the
+registry rather than for one model.
+
 ### Running the pipeline in one command
 
 `pipeline` runs every stage for every model and writes all output folders. With
-no `--models` argument it runs the entire registry, resolving each GGUF from
-`--models-dir`; a model whose GGUF is missing is skipped with a warning rather
-than aborting the run.
+no `--models` argument it runs the entire registry; a model whose GGUF is missing
+is skipped with a warning.
 
 ```bash
-# Full benchmark across all downloaded models, with confidence intervals and RCS:
-python -m seam pipeline --models-dir models --rcs --bootstrap 1000 --finetune --work seam_out
+# Full study across all models: behaviour, metrics (+CIs, +RCS), per-model
+# residual probe, detectors, confidence, report, and RCS fine-tuning.
+python -m seam pipeline --models-dir models --probe --rcs --bootstrap 1000 --finetune --work seam_out
 
-# A single problem across all models — a fast end-to-end check that exercises
-# every stage and produces every output file (`--limit 3` = one problem's three
-# variants). Detector AUROC and confidence intervals are degenerate on one
-# problem and fine-tuning is skipped; use it only to verify the plumbing.
-python -m seam pipeline --models-dir models --limit 3 --rcs --bootstrap 50 --finetune --work seam_out
+# Maximally consistent variant — behaviour also from the HF checkpoints, so each
+# model's behaviour and activations come from one model (gated Llama / Mistral
+# need `huggingface-cli login`):
+python -m seam pipeline --backend hf --probe --rcs --bootstrap 1000 --work seam_out
 
-# A single model of your choice (keys from `seam list-models`):
-python -m seam pipeline --models-dir models --models qwen2.5-7b-instruct --work seam_out
+# Fast plumbing check: all models, one problem (`--limit 3`). Detector AUROC and
+# CIs are degenerate on one problem; use only to confirm the pipeline runs.
+python -m seam pipeline --models-dir models --limit 3 --rcs --bootstrap 50 --work seam_out
+
+# A single model (keys from `seam list-models`):
+python -m seam pipeline --models-dir models --models qwen2.5-7b-instruct --probe --work seam_out
 ```
 
 ### Reproducing the complete study
 
-The following sequence produces both the behavioural and mechanistic results,
-including the residual-probe layer sweep, the confidence-to-susceptibility
-analysis, the counterfactual condition, and the per-bias breakdown. Approximate
-wall-clock times for a single 48 GB GPU (NVIDIA L40S) are shown in parentheses.
+The main study runs in one command; the counterfactual condition and the scale
+ablation are short add-ons. Approximate wall-clock for a single 48 GB GPU
+(NVIDIA L40S) is shown in parentheses; see [Installation](#installation) for
+dependencies and `huggingface-cli login` for the gated checkpoints.
 
 ```bash
-# (0) Dependencies (~5 min).
-pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu121
-pip install -U transformers accelerate sentence-transformers scikit-learn matplotlib tqdm
+# (1) Main study, all base models: behaviour + grading + metrics (CIs, RCS) +
+#     per-model residual probe + detectors + confidence + report (~2 h).
+python -m seam pipeline --models-dir models --probe --rcs --bootstrap 1000 --finetune --work seam_out
 
-# (1) The 32B scale GGUF (~15 min). The four base GGUFs are downloaded as shown
-#     above; the HF checkpoints for the probe are fetched on demand by `extract`
-#     (run `huggingface-cli login` first for the gated Llama / Mistral models).
+# (2) Counterfactual condition for the reference model, folded into its metrics (~20 min).
+python -m seam counterfactual seam_out/graded/qwen2.5-7b-instruct.jsonl \
+       --model qwen2.5-7b-instruct --out seam_out/cf/qwen.jsonl
+python -m seam run --model qwen2.5-7b-instruct --models-dir models \
+       --items seam_out/cf/qwen.jsonl --out seam_out/runs/qwen_cf.jsonl --logprobs
+python -m seam grade seam_out/runs/qwen_cf.jsonl --out seam_out/graded/qwen_cf.jsonl
+python -m seam metrics seam_out/graded/qwen2.5-7b-instruct.jsonl seam_out/graded/qwen_cf.jsonl \
+       --out metrics_qwen.json --bootstrap 1000
+
+# (3) Scale ablation: a 60-problem subset at 32B (~25 min).
 hf download bartowski/Qwen2.5-32B-Instruct-GGUF Qwen2.5-32B-Instruct-Q4_K_M.gguf --local-dir models
-
-# (2) Behavioural run for the four base models, with logprobs (~60-90 min).
-for M in qwen2.5-7b-instruct llama-3.1-8b-instruct mistral-7b-instruct-v0.3 deepseek-r1-distill-qwen-7b; do
-  python -m seam run --model $M --models-dir models --out runs/$M.jsonl --logprobs
-  python -m seam grade runs/$M.jsonl --out graded/$M.jsonl
-done
-
-# (3) Extract EVERY base model's residual stream on the misleading condition and
-#     run the per-layer probe against the text detectors, uniformly (~40 min).
-for M in qwen2.5-7b-instruct llama-3.1-8b-instruct mistral-7b-instruct-v0.3 deepseek-r1-distill-qwen-7b; do
-  python -m seam extract graded/$M.jsonl --model $M --condition misleading --out acts/${M}_mis.npz
-done
-python -m seam detect "graded/*.jsonl" --out detectors.json \
-  --activations qwen2.5-7b-instruct=acts/qwen2.5-7b-instruct_mis.npz \
-  --activations llama-3.1-8b-instruct=acts/llama-3.1-8b-instruct_mis.npz \
-  --activations mistral-7b-instruct-v0.3=acts/mistral-7b-instruct-v0.3_mis.npz \
-  --activations deepseek-r1-distill-qwen-7b=acts/deepseek-r1-distill-qwen-7b_mis.npz
-
-# (4) Behavioural metrics with confidence intervals and RCS; confidence analysis (~10 min).
-python -m seam metrics "graded/*.jsonl" --out metrics.json --rcs --bootstrap 1000
-python -m seam confidence "graded/*.jsonl" --out confidence.json --proxy logprob
-
-# (5) Counterfactual condition: build from the reference model's clean CoT, run,
-#     grade, and fold into a per-model metrics file (~20 min).
-python -m seam counterfactual graded/qwen2.5-7b-instruct.jsonl --model qwen2.5-7b-instruct --out cf/qwen.jsonl
-python -m seam run --model qwen2.5-7b-instruct --models-dir models --items cf/qwen.jsonl --out runs/qwen_cf.jsonl --logprobs
-python -m seam grade runs/qwen_cf.jsonl --out graded/qwen_cf.jsonl
-python -m seam metrics graded/qwen2.5-7b-instruct.jsonl graded/qwen_cf.jsonl --out metrics_qwen.json --bootstrap 1000
-
-# (6) Scale ablation on a 60-problem subset (~25 min).
-python -m seam run --model qwen2.5-32b-instruct --models-dir models --limit 180 --out runs/qwen32.jsonl
-python -m seam grade runs/qwen32.jsonl --out graded/qwen32.jsonl
-
-# (7) Final report (~2 min).
-python -m seam report --metrics metrics.json --detectors detectors.json \
-       --confidence confidence.json --out-dir report/
+python -m seam run --model qwen2.5-32b-instruct --models-dir models --limit 180 --out seam_out/runs/qwen32.jsonl
+python -m seam grade seam_out/runs/qwen32.jsonl --out seam_out/graded/qwen32.jsonl
 ```
 
-The central comparison is in `report/fig5_layer_sweep.png` and
+The central comparison is in `report/fig5_layer_sweep.png`,
+`report/fig9_probe_advantage.png`, and
 `report/table3_detectors.md`, which report, for each model, whether the residual
 probe attains higher grouped held-out AUROC than the text detectors (the `probe
 gain` column) and at which layer. A probe that flags shortcut reliance on the
@@ -386,7 +384,9 @@ not surface.
 | | LLM-judge detector (optional; user-supplied judge) | `detectors.llm_judge_scores` |
 | Susceptibility | flip rate by confidence tertile; point-biserial correlation | `confidence.susceptibility` |
 | Mechanistic | residual-stream extraction (per layer, last token) | `activations.extract_activations` |
-| | activation silhouette; SAE feature delta; patching logit difference; causal localization | `mechanistic.*` |
+| | clean-vs-misleading activation separability (silhouette) | `mechanistic.activation_silhouette` |
+| | probe layer-localization; SEAM mechanistic sub-score | `mechanistic.layer_localization`, `mechanistic_summary` |
+| | SAE feature delta; patching logit difference; causal localization (functions; user-supplied arrays) | `mechanistic.*` |
 | Semantic | RCS = cosine(CoT_clean, CoT_misleading); fine-tuning and held-out AUROC | `semantic.rcs_scores`, `semantic.finetune` |
 | | BERTScore, NLI entailment, coverage (optional) | `semantic.bertscore_f1` / `nli_entailment` / `coverage_score` |
 | Composite | SEAM score (weighted blend; weights in `config.py`) | `metrics.summarize` |
@@ -404,7 +404,7 @@ Each stage writes to the path given by `--out` or `--out-dir`.
 |------|-------|----------|
 | `runs/<model>.jsonl` | `run` | one row per (problem, variant): `response`, `cot`, `final_answer`, `confidence` |
 | `graded/<model>.jsonl` | `grade` | the above plus `correct`, `label`, `followed_shortcut` |
-| `acts/<model>_*.npz` | `extract` | per-layer residual-stream activations and row ids |
+| `acts/<model>_{misleading,clean}.npz` | `extract` / `pipeline --probe` | per-layer residual-stream activations and row ids |
 | `cf/<model>.jsonl` | `counterfactual` | counterfactual work-items (4th-condition prompts) |
 | `metrics.json` | `metrics` | per-model accuracies (with CIs), gap, flip rates, ECE, RCS, SEAM, by-bias, counterfactual |
 | `detectors.json` | `detect` | detector AUROC/AUPRC/flagged rate, `layer_auroc`, `best_layer` |
@@ -414,7 +414,7 @@ Each stage writes to the path given by `--out` or `--out-dir`.
 | `report/table4_bias.md` | `report` | most-effective reasoning traps |
 | `report/table_failures.md` | `report` | failure taxonomy |
 | `report/summary.csv` | `report` | flat per-model table |
-| `report/fig2`…`fig8_*.png` | `report` | black-and-white figures: gap heatmap, failure profile, detector AUROC, layer sweep, confidence, per-bias, SEAM scatter |
+| `report/fig1`…`fig9_*.png` | `report` | black-and-white figures: accuracy by condition, gap heatmap, failure profile, detector AUROC, layer sweep, confidence, per-bias, SEAM scatter, probe advantage |
 | `models/rcs-ft/` | `finetune` | fine-tuned sentence-transformer and before/after AUROC |
 
 `report/` and `summary.csv` are the human-readable outputs; `metrics.json`,

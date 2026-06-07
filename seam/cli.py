@@ -32,7 +32,8 @@ def _cmd_run(a):
     ds = data.load_dataset(a.dataset)
     cats = a.categories.split(",") if a.categories else None
     items = data.read_jsonl(a.items) if a.items else None
-    runner.run(ds, a.model, a.out, items=items, gguf_path=a.gguf, models_dir=a.models_dir,
+    runner.run(ds, a.model, a.out, items=items, backend=a.backend, dtype=a.dtype,
+               load_4bit=a.load_4bit, gguf_path=a.gguf, models_dir=a.models_dir,
                samples=a.samples, want_logprobs=a.logprobs, n_gpu_layers=a.n_gpu_layers,
                limit=a.limit, categories=cats)
 
@@ -197,7 +198,8 @@ def _cmd_pipeline(a):
         print(f"\n-- model {n}/{len(models)}: {m} --", flush=True)
         rp = os.path.join(a.work, "runs", f"{m}.jsonl")
         try:
-            runner.run(ds, m, rp, models_dir=a.models_dir, samples=a.samples,
+            runner.run(ds, m, rp, backend=a.backend, dtype=a.dtype, load_4bit=a.load_4bit,
+                       models_dir=a.models_dir, samples=a.samples,
                        want_logprobs=a.logprobs, n_gpu_layers=a.n_gpu_layers,
                        limit=a.limit, progress=True)
         except Exception as e:                           # missing GGUF, OOM, etc.
@@ -217,7 +219,45 @@ def _cmd_pipeline(a):
     for r in rows:
         by_model[r["model"]].append(r)
 
-    _banner("STAGE 3/5  metrics")
+    # Mechanistic + behavioural detectors. With --probe we extract the residual
+    # stream (misleading for the probe, clean for separability) so internal and
+    # behavioural aspects are both interrogated; the result feeds the SEAM score.
+    _banner("STAGE 3/5  detectors + mechanistic")
+    detector_res, mech_by_model = {}, {}
+    if a.probe:
+        from . import activations as act, mechanistic as mech
+        import numpy as np
+        if a.backend != "hf":
+            print("[pipeline] NOTE: --probe extracts activations from the full-precision "
+                  "hf_id checkpoint, but --backend llamacpp generated behaviour from the "
+                  "quantized GGUF. For a confound-free probe (behaviour and activations from "
+                  "one model) add --backend hf.", flush=True)
+    for n, (m, mrows) in enumerate(by_model.items(), 1):
+        separability = None
+        if a.probe and MODELS.get(m, {}).get("activations"):
+            hf_id = MODELS[m].get("hf_id")
+            mis = [r for r in mrows if r["condition"] == "misleading"]
+            cln = [r for r in mrows if r["condition"] == "clean"]
+            try:
+                print(f"[probe {n}/{len(by_model)}] {m}: residual stream", flush=True)
+                Xm, idm, lyr = act.extract_activations(mis, hf_id, dtype=a.dtype, load_4bit=a.load_4bit)
+                act.save(os.path.join(a.work, "acts", f"{m}_misleading.npz"), Xm, idm, lyr)
+                detector_res[m] = det.compare(mrows, activations=Xm, activation_ids=idm)
+                best = detector_res[m].get("best_layer")
+                if cln and best is not None:
+                    Xc, idc, _ = act.extract_activations(cln, hf_id, dtype=a.dtype, load_4bit=a.load_4bit)
+                    act.save(os.path.join(a.work, "acts", f"{m}_clean.npz"), Xc, idc, lyr)
+                    stack = np.vstack([Xc[:, best, :], Xm[:, best, :]])
+                    separability = mech.activation_silhouette(stack, [0] * len(Xc) + [1] * len(Xm))
+            except Exception as e:
+                print(f"[pipeline] probe skipped for {m}: {e}", flush=True)
+        if m not in detector_res:
+            print(f"[detect {n}/{len(by_model)}] {m}: {len(mrows)} rows (text only)", flush=True)
+            detector_res[m] = det.compare(mrows)
+        if a.probe:
+            mech_by_model[m] = mech.mechanistic_summary(detector_res[m], separability)
+
+    _banner("STAGE 4/5  metrics")
     summaries = []
     for n, (m, mrows) in enumerate(by_model.items(), 1):
         print(f"[metrics {n}/{len(by_model)}] {m}: {len(mrows)} rows"
@@ -226,13 +266,8 @@ def _cmd_pipeline(a):
         if a.rcs:
             from . import semantic
             rcs = semantic.rcs_scores(mrows)
-        summaries.append(metrics.summarize(mrows, m, rcs=rcs, ci=a.bootstrap))
-
-    _banner("STAGE 4/5  detectors")
-    detector_res = {}
-    for n, (m, mrows) in enumerate(by_model.items(), 1):
-        print(f"[detect {n}/{len(by_model)}] {m}: {len(mrows)} rows", flush=True)
-        detector_res[m] = det.compare(mrows)
+        summaries.append(metrics.summarize(mrows, m, rcs=rcs, ci=a.bootstrap,
+                                           mechanistic=mech_by_model.get(m) or None))
 
     _banner("STAGE 5/5  report")
     from . import confidence as conf
@@ -271,6 +306,11 @@ def build_parser():
     r.add_argument("--model", required=True)
     r.add_argument("--dataset", default=data.DEFAULT_DATASET)
     r.add_argument("--out", required=True)
+    r.add_argument("--backend", default="llamacpp", choices=["llamacpp", "hf"],
+                   help="llamacpp = quantized GGUF (fast); hf = the hf_id checkpoint "
+                        "(same model as activation extraction, for a consistent probe)")
+    r.add_argument("--dtype", default="float16", help="HF backend dtype")
+    r.add_argument("--load-4bit", action="store_true", help="HF backend 4-bit load")
     r.add_argument("--gguf", default=None, help="path to a local .gguf")
     r.add_argument("--models-dir", default=None,
                    help="dir of GGUFs named per the model registry")
@@ -360,8 +400,15 @@ def build_parser():
     pl.add_argument("--samples", type=int, default=1, help="self-consistency samples")
     pl.add_argument("--logprobs", action="store_true", help="record token-logprob confidence")
     pl.add_argument("--n-gpu-layers", type=int, default=-1, help="GPU layers (-1=all, 0=CPU)")
+    pl.add_argument("--backend", default="llamacpp", choices=["llamacpp", "hf"],
+                    help="hf runs the hf_id checkpoint (consistent with the probe)")
+    pl.add_argument("--dtype", default="float16")
+    pl.add_argument("--load-4bit", action="store_true")
     pl.add_argument("--rcs", action="store_true", help="compute RCS in metrics")
     pl.add_argument("--finetune", action="store_true", help="also fine-tune the RCS model")
+    pl.add_argument("--probe", action="store_true",
+                    help="extract activations and run the residual probe for every model "
+                         "(HF checkpoints; needs transformers + GPU)")
     pl.set_defaults(func=_cmd_pipeline)
     return p
 

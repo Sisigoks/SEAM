@@ -246,6 +246,7 @@ def summarize(rows, model: str, rcs: Optional[Dict[str, float]] = None,
         "failure_taxonomy": failure_taxonomy(rows, rcs),
         "seam_behavioral": behavioral,
         "seam_mechanistic": mech_score,
+        "mechanistic": mechanistic or {},
         "seam_score": seam,
         "accuracy_by_category": {
             cat: accuracy(rows, "misleading", cat)

@@ -70,6 +70,27 @@ def patching_logit_diff(logits_clean, logits_patched, target_index: int) -> Dict
     return {"mean_logit_diff": mean, "t_stat": t, "p_value": p, "n": n}
 
 
+def layer_localization(layer_auroc: Dict, k: int = 3) -> float:
+    """Share of above-chance probe detectability concentrated in the top-k layers.
+
+    High = shortcut information is localized to a few layers (a mechanistic claim).
+    """
+    effects = [max(0.0, v - 0.5) for v in layer_auroc.values() if v == v]
+    return causal_localization(effects, k=k)
+
+
+def mechanistic_summary(detector_result: Dict, separability=None) -> Dict:
+    """Build the mechanistic sub-score components from a detector result and an
+    optional clean-vs-misleading activation separability (silhouette)."""
+    out = {}
+    la = detector_result.get("layer_auroc")
+    if la:
+        out["probe_localization"] = layer_localization(la)
+    if separability is not None and separability == separability:
+        out["activation_consistency"] = max(0.0, 1.0 - max(0.0, float(separability)))
+    return out
+
+
 def causal_localization(component_effects: Sequence[float], k: int = 5) -> float:
     """Fraction of total absolute patching effect explained by the top-k components."""
     import numpy as np

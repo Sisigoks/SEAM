@@ -61,7 +61,10 @@ RCS_MODEL_SMALL = "sentence-transformers/all-MiniLM-L6-v2"
 # Composite SEAM score weights (transparent, summed to 1.0 within each block).
 BEHAVIORAL_WEIGHTS = dict(answer_stability=0.4, reasoning_faithfulness=0.3,
                           shortcut_resistance=0.3)
-MECHANISTIC_WEIGHTS = dict(activation_consistency=0.5, patching_localizability=0.5)
+# Mechanistic sub-score components actually computed from extracted activations:
+#   activation_consistency = 1 - (clean vs misleading separability)   [internal stability]
+#   probe_localization     = share of probe detectability in the top layers
+MECHANISTIC_WEIGHTS = dict(activation_consistency=0.5, probe_localization=0.5)
 SEAM_BLEND = dict(behavioral=0.5, mechanistic=0.5)
 
 # How the model is asked to reason then commit to a final answer. We use the

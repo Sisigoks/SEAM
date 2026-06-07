@@ -138,6 +138,32 @@ def save_figures(summaries, out_dir, detectors=None, confidence=None) -> List[st
     import numpy as np
     models = [s["model"] for s in summaries]
 
+    # Fig 1 — accuracy by condition (grouped bars, bootstrap-CI error bars).
+    conds = [("clean", "accuracy_clean", "accuracy_clean_ci"),
+             ("hinted", "accuracy_hinted", "accuracy_hinted_ci"),
+             ("misleading", "accuracy_misleading", "accuracy_misleading_ci")]
+    if any("accuracy_counterfactual" in s for s in summaries):
+        conds.append(("counterfactual", "accuracy_counterfactual", None))
+    with style():
+        import matplotlib.pyplot as plt
+        fig, ax = plt.subplots(figsize=(WIDE if len(models) > 3 else COL, 2.4))
+        x = np.arange(len(models)); w = 0.8 / len(conds)
+        for k, (label, key, cikey) in enumerate(conds):
+            vals = [s.get(key, float("nan")) for s in summaries]
+            yerr = None
+            if cikey and all(isinstance(s.get(cikey), list) for s in summaries):
+                lo = [max(0.0, s[key] - s[cikey][1]) for s in summaries]
+                hi = [max(0.0, s[cikey][2] - s[key]) for s in summaries]
+                yerr = [lo, hi]
+            bars = ax.bar(x + k * w - 0.4 + w / 2, vals, w, yerr=yerr, capsize=2,
+                          error_kw={"lw": 0.6}, label=label)
+            style_bars(bars, k)
+        ax.set_xticks(x); ax.set_xticklabels([_short(m) for m in models], rotation=20, ha="right")
+        ax.set_ylabel("accuracy"); ax.set_ylim(0, 1.08); ax.margins(x=0.02)
+        ax.legend(ncol=len(conds), loc="upper center", bbox_to_anchor=(0.5, 1.20))
+        ax.set_title("Accuracy by condition")
+        saved.append(save(fig, os.path.join(out_dir, "fig1_accuracy.png")))
+
     # Fig 2 — Shortcut Reliance Gap heatmap (model x domain), grayscale.
     cats = sorted({c for s in summaries for c in s.get("shortcut_reliance_gap_by_category", {})})
     if cats:
@@ -147,7 +173,7 @@ def save_figures(summaries, out_dir, detectors=None, confidence=None) -> List[st
             import matplotlib.pyplot as plt
             fig, ax = plt.subplots(figsize=(min(WIDE, 0.5 * len(cats) + 1.6), 0.42 * len(models) + 1.1))
             vmax = max(1.0, float(np.abs(M).max()))
-            im = ax.imshow(np.abs(M), cmap="Greys", vmin=0, vmax=vmax, aspect="auto")
+            ax.imshow(np.abs(M), cmap="Greys", vmin=0, vmax=vmax, aspect="auto")
             ax.set_xticks(range(len(cats))); ax.set_xticklabels([c[:10] for c in cats], rotation=40, ha="right")
             ax.set_yticks(range(len(models))); ax.set_yticklabels([_short(m) for m in models])
             for i in range(M.shape[0]):
@@ -218,6 +244,24 @@ def save_figures(summaries, out_dir, detectors=None, confidence=None) -> List[st
             ax.set_ylim(0.45, 1.03); ax.margins(x=0.04); ax.legend(ncol=1, loc="lower right")
             ax.set_title("Shortcut detectability by layer")
             saved.append(save(fig, os.path.join(out_dir, "fig5_layer_sweep.png")))
+
+    # Fig 9 — residual-probe advantage per model (probe AUROC − best text AUROC).
+    adv = [(m, res.get("probe_advantage")) for m, res in (detectors or {}).items()
+           if res.get("probe_advantage") is not None and res.get("probe_advantage") == res.get("probe_advantage")]
+    if adv:
+        with style():
+            import matplotlib.pyplot as plt
+            ms, vs = [_short(m) for m, _ in adv], [v for _, v in adv]
+            fig, ax = plt.subplots(figsize=(COL, 0.45 * len(adv) + 1.0))
+            bars = ax.barh(range(len(ms)), vs); style_bars(bars, 2)
+            ax.axvline(0, color="0.35", lw=0.7)
+            ax.set_yticks(range(len(ms))); ax.set_yticklabels(ms)
+            for i, v in enumerate(vs):
+                ax.text(v + (0.004 if v >= 0 else -0.004), i, f"{v:+.3f}", va="center",
+                        ha="left" if v >= 0 else "right", fontsize=7)
+            ax.set_xlabel("probe AUROC − best text detector"); ax.margins(x=0.18, y=0.08)
+            ax.set_title("Residual-probe advantage")
+            saved.append(save(fig, os.path.join(out_dir, "fig9_probe_advantage.png")))
 
     # Fig 6 — susceptibility vs. confidence (the confidence analysis).
     if confidence:
